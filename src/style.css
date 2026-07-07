@@ -1,0 +1,188 @@
+/* ============================================================
+   DEAD DROP — UI / overlay styling
+   The game world is drawn on canvas; everything here is menus,
+   overlays and the CRT post-fx.
+   ============================================================ */
+
+:root {
+  --pink: #ff2d95;
+  --cyan: #00e5ff;
+  --red: #ff2d3b;
+  --ink: #08010c;
+  --lav: #e7c8ff;
+  --dim: #8a7a9a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0; padding: 0;
+  height: 100%;
+  background: var(--ink);
+  overflow: hidden;
+}
+
+body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: 'Share Tech Mono', monospace;
+  user-select: none;
+}
+
+/* --- fixed 960x600 stage, scaled to fit the window by main.js --- */
+#frame {
+  position: relative;
+  width: 960px; height: 600px;
+  overflow: hidden;
+  background: var(--ink);
+  box-shadow: 0 0 0 1px rgba(255,45,149,.25), 0 30px 90px rgba(0,0,0,.7);
+  transform-origin: center center;
+}
+
+/* Phaser injects its canvas into #frame */
+#frame canvas {
+  position: absolute; inset: 0;
+  width: 960px !important; height: 600px !important;
+  display: block;
+  cursor: crosshair;
+}
+
+/* --- CRT post fx --- */
+.fx { position: absolute; inset: 0; pointer-events: none; z-index: 5; }
+.scanlines {
+  background: repeating-linear-gradient(0deg,
+    rgba(0,0,0,0) 0px, rgba(0,0,0,0) 2px,
+    rgba(0,0,0,.22) 3px, rgba(0,0,0,0) 4px);
+  mix-blend-mode: multiply;
+}
+.vignette {
+  background: radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(0,0,0,.55) 100%);
+}
+
+/* --- animations --- */
+@keyframes ddflicker { 0%,19%,21%,55%,57%,100%{opacity:1} 20%,56%{opacity:.62} }
+@keyframes ddglitch {
+  0%{transform:translate(0,0)} 25%{transform:translate(-2px,1px)}
+  50%{transform:translate(2px,-1px)} 75%{transform:translate(-1px,-1px)} 100%{transform:translate(0,0)}
+}
+@keyframes ddpulse { 0%,100%{opacity:.35} 50%{opacity:1} }
+
+/* --- overlays --- */
+.overlay {
+  position: absolute; inset: 0; z-index: 10;
+  display: none;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  color: var(--lav);
+}
+.overlay.on { display: flex; }
+.overlay.align-left { align-items: flex-start; text-align: left; padding: 0 92px; }
+
+.menu-bg     { background: radial-gradient(ellipse at 50% 38%, rgba(120,10,80,.35), rgba(8,1,12,.92) 70%); }
+.briefing-bg { background: linear-gradient(180deg, rgba(8,1,12,.96), rgba(30,2,26,.96)); }
+.dead-bg     { background: radial-gradient(ellipse at center, rgba(120,0,20,.4), rgba(8,1,12,.95) 70%); }
+.clear-bg    { background: radial-gradient(ellipse at center, rgba(0,120,110,.35), rgba(8,1,12,.95) 72%); }
+.pause-bg    { background: rgba(8,1,12,.82); }
+
+/* --- type --- */
+.kicker {
+  font-size: 11px; letter-spacing: 7px;
+  color: var(--cyan);
+  text-shadow: 0 0 10px rgba(0,229,255,.8);
+  animation: ddflicker 4s infinite;
+}
+.title {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 58px; line-height: 1; letter-spacing: 2px;
+  margin: 16px 0 6px;
+  color: var(--pink);
+  text-shadow: 3px 3px 0 var(--cyan), -2px -1px 0 rgba(160,0,255,.7), 0 0 26px rgba(255,45,149,.8);
+  animation: ddglitch 3.5s infinite;
+}
+.tagline { font-size: 15px; letter-spacing: 2px; margin-top: 14px; max-width: 440px; }
+
+.chapter {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 20px; letter-spacing: 1px;
+  color: var(--cyan);
+  text-shadow: 0 0 16px rgba(0,229,255,.7);
+}
+.rule {
+  width: 64px; height: 3px;
+  background: var(--pink);
+  margin: 20px 0 26px;
+  box-shadow: 0 0 12px var(--pink);
+}
+#brief-body p {
+  font-size: 17px; line-height: 1.9;
+  color: #e9d8f5; max-width: 640px;
+  margin: 0 0 16px;
+}
+#brief-body .pink, .pink { color: var(--pink); }
+#brief-body .cyan, .cyan { color: var(--cyan); }
+
+.deadtitle {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 52px; letter-spacing: 2px;
+  color: var(--red);
+  text-shadow: 3px 3px 0 rgba(0,0,0,.6), 0 0 30px rgba(255,45,59,.8);
+  animation: ddglitch 2.2s infinite;
+}
+.cleartitle {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 38px; letter-spacing: 2px;
+  color: var(--cyan);
+  text-shadow: 3px 3px 0 var(--pink), 0 0 28px rgba(0,229,255,.8);
+}
+.copy { margin-top: 26px; font-size: 16px; line-height: 1.8; color: #e9d8f5; max-width: 540px; }
+
+.score-line { margin-top: 26px; font-size: 15px; color: #c9b8d5; letter-spacing: 1px; }
+.sub-line   { margin-top: 8px; font-size: 13px; color: var(--dim); letter-spacing: 1px; }
+.best-line  { margin-top: 24px; font-size: 12px; letter-spacing: 2px; color: var(--pink); }
+.bright     { color: #fff; text-shadow: 0 0 10px rgba(255,255,255,.6); }
+.bright.lg  { font-size: 22px; }
+.hint       { margin-top: 22px; font-size: 12px; color: #6a5a7a; letter-spacing: 2px; }
+
+/* --- buttons --- */
+.btn {
+  font-family: 'Press Start 2P', monospace;
+  font-size: 13px;
+  padding: 14px 22px;
+  border: none; cursor: pointer;
+  letter-spacing: 1px;
+  transition: transform .08s;
+}
+.btn-pink {
+  color: var(--ink); background: var(--pink);
+  box-shadow: 5px 5px 0 rgba(0,229,255,.85);
+}
+.btn-cyan {
+  color: var(--ink); background: var(--cyan);
+  box-shadow: 5px 5px 0 rgba(255,45,149,.85);
+}
+.btn-pink:hover, .btn-cyan:hover { transform: translate(-2px,-2px); }
+.btn-ghost {
+  color: var(--lav); background: transparent;
+  border: 2px solid #6a5a7a;
+}
+.btn-ghost:hover { border-color: var(--cyan); color: var(--cyan); }
+.btn.big { font-size: 15px; padding: 16px 30px; margin-top: 34px;
+  box-shadow: 0 0 0 2px var(--pink), 6px 6px 0 rgba(0,229,255,.85); }
+.btn.big:hover { box-shadow: 0 0 0 2px var(--pink), 8px 8px 0 rgba(0,229,255,1); }
+.btn-row { display: flex; gap: 16px; margin-top: 34px; }
+#btn-begin { align-self: flex-start; margin-top: 8px; }
+#ov-briefing .hint { align-self: flex-start; }
+
+/* --- controls table on menu --- */
+.controls-grid {
+  margin-top: 30px;
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: 4px 22px;
+  font-size: 12px; color: var(--dim); letter-spacing: 1px;
+  text-align: left;
+}
+.controls-grid .k { color: var(--cyan); text-align: right; }

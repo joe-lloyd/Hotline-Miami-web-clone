@@ -1,0 +1,22 @@
+{
+  "name": "dead-drop",
+  "version": "1.0.0",
+  "private": true,
+  "description": "DEAD DROP — a neon-noir top-down action game. Phaser 3 + TypeScript.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "test": "node test/run.mjs"
+  },
+  "dependencies": {
+    "phaser": "^3.87.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vite": "^6.0.0",
+    "puppeteer-core": "^24.0.0"
+  }
+}

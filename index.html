@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>DEAD DROP — a neon noir top-down shooter</title>
+<meta name="description" content="Run the package. Bury the crew. Buy back your freedom. A neon-noir top-down action game.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%2308010c'/%3E%3Ctext x='16' y='23' font-size='20' text-anchor='middle' fill='%23ff2d95'%3E%E2%97%89%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Press+Start+2P&family=Share+Tech+Mono&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div id="frame">
+  <!-- Phaser injects its canvas here -->
+
+  <!-- CRT overlays -->
+  <div class="fx scanlines"></div>
+  <div class="fx vignette"></div>
+
+  <!-- ===== MENU ===== -->
+  <div id="ov-menu" class="overlay menu-bg">
+    <div class="kicker">A NEON NOIR</div>
+    <h1 class="title">DEAD<br>DROP</h1>
+    <div class="tagline">Run the package. Bury the crew.<br>Buy back your freedom.</div>
+    <button id="btn-start" class="btn btn-pink big">&#9654; START RUN</button>
+    <div class="controls-grid">
+      <span class="k">WASD</span><span>move</span>
+      <span class="k">MOUSE</span><span>aim</span>
+      <span class="k">L-CLICK</span><span>attack / shoot / kick doors</span>
+      <span class="k">SHIFT / SPACE</span><span>dodge roll</span>
+      <span class="k">R-CLICK / F / Q</span><span>parry</span>
+      <span class="k">E</span><span>pick up / throw weapon</span>
+      <span class="k">ESC</span><span>pause</span>
+    </div>
+    <div class="best-line">BEST SCORE&nbsp;&nbsp;<span id="menu-best" class="bright">0</span></div>
+  </div>
+
+  <!-- ===== BRIEFING ===== -->
+  <div id="ov-briefing" class="overlay briefing-bg align-left">
+    <div id="brief-chapter" class="chapter">CH.01</div>
+    <div class="rule"></div>
+    <div id="brief-body"></div>
+    <button id="btn-begin" class="btn btn-cyan">CONTINUE &#9654;</button>
+    <div class="hint">press ENTER</div>
+  </div>
+
+  <!-- ===== PAUSE ===== -->
+  <div id="ov-pause" class="overlay pause-bg">
+    <div class="chapter" style="font-size:34px;color:#00e5ff;">PAUSED</div>
+    <div class="btn-row">
+      <button id="btn-resume" class="btn btn-cyan">&#9654; RESUME</button>
+      <button id="btn-retry-pause" class="btn btn-ghost">&#8635; RESTART FLOOR</button>
+      <button id="btn-quit" class="btn btn-ghost">QUIT TO MENU</button>
+    </div>
+    <div class="hint">press ESC to resume</div>
+  </div>
+
+  <!-- ===== GAME OVER ===== -->
+  <div id="ov-dead" class="overlay dead-bg">
+    <div class="deadtitle">YOU'RE DEAD</div>
+    <div class="score-line">SCORE&nbsp;&nbsp;<span id="dead-score" class="bright lg">0</span></div>
+    <div class="sub-line">BEST&nbsp;&nbsp;<span id="dead-best">0</span></div>
+    <div class="btn-row">
+      <button id="btn-retry" class="btn btn-pink">&#8635; RETRY</button>
+      <button id="btn-menu-dead" class="btn btn-ghost">MENU</button>
+    </div>
+    <div class="hint">press ENTER to retry</div>
+  </div>
+
+  <!-- ===== FLOOR CLEARED ===== -->
+  <div id="ov-clear" class="overlay clear-bg">
+    <div class="cleartitle">FLOOR CLEARED</div>
+    <p id="clear-copy" class="copy">One building down. The Voronovs will send more &mdash; they always do.<br><span class="pink">Freedom has a body count. You're just getting started.</span></p>
+    <div class="score-line">SCORE&nbsp;&nbsp;<span id="clear-score" class="bright lg">0</span></div>
+    <div class="btn-row">
+      <button id="btn-next" class="btn btn-cyan">NEXT FLOOR &#9654;</button>
+      <button id="btn-menu-clear" class="btn btn-ghost">MENU</button>
+    </div>
+    <div class="hint">press ENTER</div>
+  </div>
+
+  <!-- ===== WIN ===== -->
+  <div id="ov-win" class="overlay clear-bg">
+    <div class="cleartitle">DEBT PAID</div>
+    <p class="copy">The last floor is quiet. The ledger with your name on it burns in a steel sink.<br><span class="pink">Nobody runs packages forever. Tonight, nobody runs you.</span></p>
+    <div class="score-line">FINAL SCORE&nbsp;&nbsp;<span id="win-score" class="bright lg">0</span></div>
+    <div class="sub-line">BEST&nbsp;&nbsp;<span id="win-best">0</span></div>
+    <div class="btn-row">
+      <button id="btn-again" class="btn btn-cyan">&#9654; RUN IT BACK</button>
+      <button id="btn-menu-win" class="btn btn-ghost">MENU</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="/src/main.ts"></script>
+</body>
+</html>
