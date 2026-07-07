@@ -58,8 +58,8 @@ export const PLAYER = {
 };
 
 export const PLAYER_PAL: CharPalette = {
-  jacket: '#ff2d95', jdark: '#a8175f', hair: '#ffe14a', skin: '#ffcfa8', pants: '#2a1030',
-  fem: true, // she reads as a woman from top-down: shoulders, hair, bust silhouette
+  jacket: '#ff2d95', jdark: '#a8175f', hair: '#20202b', skin: '#ffcfa8', pants: '#2a1030',
+  fem: true, // reads as a woman from top-down: shoulders, black pixie cut, bust silhouette
 };
 
 export const COMBO_TIME = 3.2;      // seconds before a kill combo resets

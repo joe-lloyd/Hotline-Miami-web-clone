@@ -44,6 +44,8 @@ export interface RigInput {
   windupMax?: number;
   inv?: boolean;      // dodge i-frames -> ghosted alpha
   hitFlash?: number;
+  /** out of combat and unarmed: arms hang relaxed at the sides */
+  relaxed?: boolean;
 }
 
 type ActionType = 'swing' | 'pickup' | 'kick' | 'throw' | 'roll';
@@ -76,16 +78,24 @@ export class CharacterRig {
   private time = 0;
   private isCorpse = false;
   private isDown = false;    // knocked down (punch) — sprawled but alive
+  private stance = 1;        // arm pose blend: 0 relaxed at sides, 1 combat-ready
+
+  /** limb bar thicknesses — the fem build is slimmer */
+  private armTh: number;
+  private legTh: number;
 
   constructor(scene: Phaser.Scene, x: number, y: number, pal: CharPalette, r: number) {
     this.s = r / 11;
     this.keys = makeCharTextures(scene, pal);
+    this.armTh = pal.fem ? 3.4 : 4.2;
+    this.legTh = pal.fem ? 3.0 : 3.6;
     const s = this.s, k = s / RES;
     const keys = this.keys;
 
     const img = (tex: string) => scene.add.image(0, 0, tex).setScale(k);
 
-    const shadow = scene.add.image(0, 2.5 * s, 'shadow').setScale(k);
+    const shadow = scene.add.image(0, 2.5 * s, 'shadow')
+      .setScale(k * (pal.fem ? 0.82 : 1), k * (pal.fem ? 0.76 : 1));
 
     this.legL = img(keys.leg).setOrigin(0, 0.5);
     this.legR = img(keys.leg).setOrigin(0, 0.5);
@@ -165,8 +175,8 @@ export class CharacterRig {
     }
     this.footL.setPosition(flx, fly);
     this.footR.setPosition(frx, fry);
-    this.poseLimb(this.legL, -2 * s, -4.2 * s, flx, fly, 3.6 * s);
-    this.poseLimb(this.legR, -2 * s, 4.2 * s, frx, fry, 3.6 * s);
+    this.poseLimb(this.legL, -2 * s, -4.2 * s, flx, fly, this.legTh * s);
+    this.poseLimb(this.legR, -2 * s, 4.2 * s, frx, fry, this.legTh * s);
 
     // ----- torso: aim direction (+ stagger wobble) -----
     let aim = st.aim;
@@ -187,6 +197,9 @@ export class CharacterRig {
     let hlx: number, hly: number, hrx: number, hry: number;
     let wx = 0, wy = 0, wrot = 0;
     const swingArm = st.moving ? Math.sin(st.phase) * 1.8 * s : 0;
+    // stance blend: 0 = arms relaxed at the sides, 1 = combat guard.
+    // Any action (swing/kick/throw/...) counts as guard immediately.
+    this.stance += ((st.relaxed && !act ? 0 : 1) - this.stance) * Math.min(1, dt * 9);
 
     if (isGun) {
       // two-handed grip, weapon centered forward
@@ -197,6 +210,14 @@ export class CharacterRig {
       hlx = 7.5 * s; hly = -6.5 * s + swingArm;
       hrx = 7.5 * s; hry = 6.5 * s - swingArm;
       [hrx, hry] = rot(hrx, hry, armAng); // punches follow the swing
+      // relaxed arms hang at her sides and swing naturally with the walk
+      const k = 1 - this.stance;
+      if (k > 0.001) {
+        hlx += (-1.5 * s + swingArm * 1.5 - hlx) * k;
+        hly += (-7.8 * s - hly) * k;
+        hrx += (-1.5 * s - swingArm * 1.5 - hrx) * k;
+        hry += (7.8 * s - hry) * k;
+      }
     } else {
       // one-handed melee: right hand grips, weapon sweeps with armAng
       [hrx, hry] = rot(9.5 * s, 4.5 * s, armAng);
@@ -217,8 +238,8 @@ export class CharacterRig {
 
     this.handL.setPosition(hlx, hly);
     this.handR.setPosition(hrx, hry);
-    this.poseLimb(this.armL, -1.5 * s, -7 * s, hlx, hly, 4.2 * s);
-    this.poseLimb(this.armR, -1.5 * s, 7 * s, hrx, hry, 4.2 * s);
+    this.poseLimb(this.armL, -1.5 * s, -7 * s, hlx, hly, this.armTh * s);
+    this.poseLimb(this.armR, -1.5 * s, 7 * s, hrx, hry, this.armTh * s);
     this.weaponSpr.setPosition(wx, wy).setRotation(wrot);
 
     // armored hit feedback: white blink overlay (canvas-safe, no tint)
@@ -250,13 +271,13 @@ export class CharacterRig {
     this.flash.setAlpha(0);
     this.footL.setPosition(-12 * s, 7 * s);
     this.footR.setPosition(-13 * s, -4 * s);
-    this.poseLimb(this.legL, -3 * s, 3 * s, -12 * s, 7 * s, 3.6 * s);
-    this.poseLimb(this.legR, -3 * s, -3 * s, -13 * s, -4 * s, 3.6 * s);
+    this.poseLimb(this.legL, -3 * s, 3 * s, -12 * s, 7 * s, this.legTh * s);
+    this.poseLimb(this.legR, -3 * s, -3 * s, -13 * s, -4 * s, this.legTh * s);
     // arms bracing, trying to push back up
     this.handL.setPosition(7 * s, -9 * s);
     this.handR.setPosition(8 * s, 8 * s);
-    this.poseLimb(this.armL, 2 * s, -5 * s, 7 * s, -9 * s, 4 * s);
-    this.poseLimb(this.armR, 2 * s, 5 * s, 8 * s, 8 * s, 4 * s);
+    this.poseLimb(this.armL, 2 * s, -5 * s, 7 * s, -9 * s, this.armTh * s);
+    this.poseLimb(this.armR, 2 * s, 5 * s, 8 * s, 8 * s, this.armTh * s);
     this.head.setPosition(7 * s, 1 * s);
   }
 
@@ -293,13 +314,13 @@ export class CharacterRig {
     // splayed legs
     this.footL.setPosition(-13 * s, 8 * s);
     this.footR.setPosition(-14 * s, -5 * s);
-    this.poseLimb(this.legL, -3 * s, 3 * s, -13 * s, 8 * s, 3.6 * s);
-    this.poseLimb(this.legR, -3 * s, -3 * s, -14 * s, -5 * s, 3.6 * s);
+    this.poseLimb(this.legL, -3 * s, 3 * s, -13 * s, 8 * s, this.legTh * s);
+    this.poseLimb(this.legR, -3 * s, -3 * s, -14 * s, -5 * s, this.legTh * s);
     // arms flung out
     this.handL.setPosition(9 * s, -12 * s);
     this.handR.setPosition(11 * s, 9 * s);
-    this.poseLimb(this.armL, 2 * s, -5 * s, 9 * s, -12 * s, 4 * s);
-    this.poseLimb(this.armR, 2 * s, 5 * s, 11 * s, 9 * s, 4 * s);
+    this.poseLimb(this.armL, 2 * s, -5 * s, 9 * s, -12 * s, this.armTh * s);
+    this.poseLimb(this.armR, 2 * s, 5 * s, 11 * s, 9 * s, this.armTh * s);
     // head flung forward
     this.head.setPosition(8.5 * s, 1.5 * s);
   }

@@ -62,16 +62,21 @@ export function parseLevel(L: LevelDef): ParsedLevel {
   for (const d of doors) d.o = wall(d.tx - 1, d.ty) && wall(d.tx + 1, d.ty) ? 'h' : 'v';
 
   // neon trim segments — pushed WALL_INSET px into the wall tile so the
-  // trim hugs the visible (inset) wall face drawn by buildWorldImage
+  // trim hugs the visible (inset) wall face drawn by buildWorldImage.
+  // Segment ENDS are clamped too: where the perpendicular neighbor is
+  // open floor the wall face is inset, so the line must stop with it
+  // instead of poking out over the floor.
   const edges: ParsedLevel['edges'] = [];
   const I = WALL_INSET;
   const open = (x: number, y: number) => y >= 0 && y < H && x >= 0 && x < W && grid[y][x] === 0;
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
     if (grid[y][x] !== 1) continue;
-    if (open(x, y - 1)) edges.push([x * T, y * T + I, x * T + T, y * T + I]);
-    if (open(x, y + 1)) edges.push([x * T, y * T + T - I, x * T + T, y * T + T - I]);
-    if (open(x - 1, y)) edges.push([x * T + I, y * T, x * T + I, y * T + T]);
-    if (open(x + 1, y)) edges.push([x * T + T - I, y * T, x * T + T - I, y * T + T]);
+    const cutL = open(x - 1, y) ? I : 0, cutR = open(x + 1, y) ? I : 0;
+    const cutT = open(x, y - 1) ? I : 0, cutB = open(x, y + 1) ? I : 0;
+    if (open(x, y - 1)) edges.push([x * T + cutL, y * T + I, x * T + T - cutR, y * T + I]);
+    if (open(x, y + 1)) edges.push([x * T + cutL, y * T + T - I, x * T + T - cutR, y * T + T - I]);
+    if (open(x - 1, y)) edges.push([x * T + I, y * T + cutT, x * T + I, y * T + T - cutB]);
+    if (open(x + 1, y)) edges.push([x * T + T - I, y * T + cutT, x * T + T - I, y * T + T - cutB]);
   }
 
   return { grid, W, H, worldW: W * T, worldH: H * T, player, exit, doors, enemies, pickups, edges };

@@ -75,6 +75,7 @@ export class PlayScene extends Phaser.Scene {
   ts = 1;                // timescale (slow-mo)
   slowT = 0;
   killFlash = 0;         // red background pulse timer (kills)
+  combatT = 0;           // >0 while in a fight — drives the relaxed idle stance
 
   // --- visuals ---
   private playerRig!: CharacterRig;
@@ -115,7 +116,7 @@ export class PlayScene extends Phaser.Scene {
     this.doors = []; this.rigs.clear(); this.doorMap.clear();
     this.combo = 0; this.comboT = 0;
     this.cleared = false; this.over = false;
-    this.ts = 1; this.slowT = 0; this.killFlash = 0;
+    this.ts = 1; this.slowT = 0; this.killFlash = 0; this.combatT = 0;
     this.mouseDown = false;
     this.attackTap = this.dashTap = this.parryTap = this.pickTap = false;
 
@@ -234,6 +235,7 @@ export class PlayScene extends Phaser.Scene {
       rush: def.behavior === 'melee',
       patrolT: 0, pvx: 0, pvy: 0,
       downed: false, downT: 0, hadLOS: false, searchT: 0,
+      path: null, pathT: 0,
     };
     this.enemies.push(e);
     const rig = new CharacterRig(this, x, y, def.pal, def.r);
@@ -304,6 +306,72 @@ export class PlayScene extends Phaser.Scene {
     return true;
   }
 
+  /** Line-of-WALK: a corridor wide enough for a body of radius r. */
+  private clearWide(x1: number, y1: number, x2: number, y2: number, r: number): boolean {
+    const dx = x2 - x1, dy = y2 - y1, l = Math.hypot(dx, dy) || 1;
+    const ox = -dy / l * r * 0.9, oy = dx / l * r * 0.9;
+    return this.lineClear(x1, y1, x2, y2)
+      && this.lineClear(x1 + ox, y1 + oy, x2 + ox, y2 + oy)
+      && this.lineClear(x1 - ox, y1 - oy, x2 - ox, y2 - oy);
+  }
+
+  /**
+   * 4-way BFS over walkable tiles. Closed doors count as walkable —
+   * aware enemies push them open on the way through. Returns tile-center
+   * waypoints (start tile excluded), or null if unreachable.
+   */
+  private findPath(sx: number, sy: number, gx: number, gy: number): { x: number; y: number }[] | null {
+    const lvl = this.lvl, W = lvl.W, H = lvl.H, T = TILE;
+    const sx0 = Math.floor(sx / T), sy0 = Math.floor(sy / T);
+    const gx0 = Math.floor(gx / T), gy0 = Math.floor(gy / T);
+    const inb = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H;
+    if (!inb(sx0, sy0) || !inb(gx0, gy0) || lvl.grid[gy0][gx0] === 1) return null;
+    const start = sy0 * W + sx0, goal = gy0 * W + gx0;
+    if (start === goal) return [];
+    const prev = new Int32Array(W * H).fill(-1);
+    prev[start] = start;
+    const q = [start];
+    for (let qi = 0; qi < q.length && prev[goal] < 0; qi++) {
+      const cx = q[qi] % W, cy = (q[qi] / W) | 0;
+      for (const [nx, ny] of [[cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]]) {
+        const ni = ny * W + nx;
+        if (inb(nx, ny) && lvl.grid[ny][nx] === 0 && prev[ni] < 0) { prev[ni] = q[qi]; q.push(ni); }
+      }
+    }
+    if (prev[goal] < 0) return null;
+    const out: { x: number; y: number }[] = [];
+    for (let cur = goal; cur !== start; cur = prev[cur])
+      out.push({ x: (cur % W) * T + T / 2, y: ((cur / W) | 0) * T + T / 2 });
+    return out.reverse();
+  }
+
+  /**
+   * Walk an enemy toward a world target, routing around walls via BFS
+   * when the straight corridor is blocked, opening doors along the way.
+   */
+  private navToward(e: EnemyState, tx: number, ty: number, speed: number, dt: number): void {
+    let ax = tx, ay = ty;
+    if (this.clearWide(e.x, e.y, tx, ty, e.r)) {
+      e.path = null;
+    } else {
+      e.pathT -= dt;
+      if (!e.path?.length || e.pathT <= 0) {
+        e.path = this.findPath(e.x, e.y, tx, ty);
+        e.pathT = 0.45;
+      }
+      if (e.path) {
+        while (e.path.length && Math.hypot(e.path[0].x - e.x, e.path[0].y - e.y) < 12) e.path.shift();
+        // smoothing: skip a waypoint when the next one is directly walkable
+        if (e.path.length > 1 && this.clearWide(e.x, e.y, e.path[1].x, e.path[1].y, e.r)) e.path.shift();
+        if (e.path.length) { ax = e.path[0].x; ay = e.path[0].y; }
+      }
+    }
+    const a = Math.atan2(ay - e.y, ax - e.x);
+    const door = this.doorAhead(e, a, 6);
+    if (door) { door.open(false); audio.sfx('doorOpen'); }
+    this.moveEntity(e, Math.cos(a) * speed * dt, Math.sin(a) * speed * dt);
+  }
+
   /** Closed door directly ahead of a moving body, if any. */
   private doorAhead(ent: Body, ang: number, reach: number): Door | null {
     const px = ent.x + Math.cos(ang) * (ent.r + reach);
@@ -333,6 +401,9 @@ export class PlayScene extends Phaser.Scene {
     const p = this.player;
 
     if (this.comboT > 0) { this.comboT -= dt; if (this.comboT <= 0) this.combo = 0; }
+    this.combatT -= dt;
+    // anyone actively hunting her keeps the guard up
+    if (this.enemies.some(e => e.alive && e.aware)) this.combatT = Math.max(this.combatT, 0.7);
     for (const d of this.doors) if (d.state.busy > 0) d.state.busy -= dt;
 
     this.updatePlayer(dt);
@@ -401,6 +472,7 @@ export class PlayScene extends Phaser.Scene {
       if (p.parryCd <= 0) {
         p.parryT = PLAYER.parryWindow;
         p.parryCd = PLAYER.parryCd;
+        this.enterCombat();
         audio.sfx('parrySwing');
       }
     }
@@ -435,9 +507,13 @@ export class PlayScene extends Phaser.Scene {
     this.attackTap = false;
   }
 
+  /** Refresh the fight timer — while it runs she keeps her guard up. */
+  enterCombat(): void { this.combatT = Math.max(this.combatT, 3); }
+
   // ================= doors =================
   kickDoor(door: Door): void {
     door.open(true);
+    this.enterCombat();
     audio.sfx('kick');
     this.alertNoise(door.cx, door.cy, KICK_NOISE);
     this.shake(8, 0.15);
@@ -570,6 +646,7 @@ export class PlayScene extends Phaser.Scene {
     };
     const spr = this.add.image(st.x, st.y, 'wpn-' + st.w).setDepth(6).setScale(0.25);
     this.throwables.push({ st, spr });
+    this.enterCombat();
     p.weapon = 'fists'; p.ammo = 0;
     this.playerRig.playThrow();
     this.playerRig.setWeapon('fists');
@@ -580,6 +657,7 @@ export class PlayScene extends Phaser.Scene {
   meleeAttack(): void {
     const p = this.player;
     const w = WEAPONS[p.weapon];
+    this.enterCombat();
     // chained swings inside the combo window use the faster follow-up cd
     p.atkT = p.chainT > 0 ? (w.cd2 ?? w.cd) : w.cd;
     p.chainT = p.atkT + 0.75;
@@ -637,6 +715,7 @@ export class PlayScene extends Phaser.Scene {
   fireGun(): void {
     const p = this.player;
     const w = WEAPONS[p.weapon];
+    this.enterCombat();
     if (p.ammo <= 0) { audio.sfx('click'); p.atkT = 0.2; return; }
     p.atkT = w.cd; p.ammo--;
     for (let i = 0; i < (w.pellets ?? 1); i++) {
@@ -695,10 +774,18 @@ export class PlayScene extends Phaser.Scene {
 
     if (!e.aware) {
       e.patrolT -= dt;
-      if (e.patrolT <= 0) {
+      // re-roll when the timer runs out OR a wall looms ahead — patrollers
+      // turn away from walls instead of grinding into them
+      const blocked = this.solid(e.x + e.pvx * (e.r + 12), e.y + e.pvy * (e.r + 12));
+      if (e.patrolT <= 0 || blocked) {
         e.patrolT = 1 + Math.random() * 1.5;
-        const a = Math.random() * 6.28;
-        e.pvx = Math.cos(a); e.pvy = Math.sin(a); e.ang = a;
+        for (let i = 0; i < 8; i++) {
+          const a = Math.random() * 6.28;
+          if (!this.solid(e.x + Math.cos(a) * (e.r + 14), e.y + Math.sin(a) * (e.r + 14))) {
+            e.pvx = Math.cos(a); e.pvy = Math.sin(a); e.ang = a;
+            break;
+          }
+        }
       }
       this.moveEntity(e, e.pvx * def.patrolSpeed * dt, e.pvy * def.patrolSpeed * dt);
       return;
@@ -732,8 +819,8 @@ export class PlayScene extends Phaser.Scene {
       e.react -= dt; e.cd -= dt;
       const range = def.range ?? 230;
       if (!los) {
-        // hunt: push toward the last known position to regain a firing line
-        this.moveEntity(e, Math.cos(ang) * def.speed * dt, Math.sin(ang) * def.speed * dt);
+        // hunt: route to the last known position to regain a firing line
+        this.navToward(e, tgt.x, tgt.y, def.speed, dt);
         return;
       }
       if (dToP > range - 30) this.moveEntity(e, Math.cos(ang) * def.speed * dt, Math.sin(ang) * def.speed * dt);
@@ -754,8 +841,9 @@ export class PlayScene extends Phaser.Scene {
       if (e.windup <= 0) this.resolveMeleeStrike(e);
       return;
     }
-    if (dToP > 40) this.moveEntity(e, Math.cos(ang) * def.speed * dt, Math.sin(ang) * def.speed * dt);
-    if (dToP < 46 && e.atkCd <= 0) {
+    if (!los) this.navToward(e, tgt.x, tgt.y, def.speed, dt);
+    else if (dToP > 40) this.navToward(e, tgt.x, tgt.y, def.speed, dt);
+    if (los && dToP < 46 && e.atkCd <= 0) {
       e.windup = def.windup;
       audio.sfx('windup');
     }
@@ -905,6 +993,7 @@ export class PlayScene extends Phaser.Scene {
       this.playerRig.update(dt, {
         x: p.x, y: p.y, aim: p.ang, moveAng: p.moveAng, moving: p.moving,
         phase: p.wphase, inv: p.inv > 0,
+        relaxed: p.weapon === 'fists' && this.combatT <= 0,
       });
       this.playerRig.setWeapon(p.weapon);
     }

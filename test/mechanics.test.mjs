@@ -183,6 +183,26 @@ try {
   check('gunner hears shot and investigates', r.heard && r.after < r.before - 40,
     `dist ${Math.round(r.before)} -> ${Math.round(r.after)}`);
 
+  // --- 4e. pathfinding: routes around walls / through doors to a noise ---
+  await begin();
+  r = await scene(`(S) => {
+    const p = S.player;
+    const noise = { x: p.x, y: p.y };
+    // around a corner: the straight line to the noise is walled off, the
+    // only way is up the side corridor and through the door
+    S.spawnEnemy('gunner', p.x + 220, p.y + 64);
+    const e = S.enemies[S.enemies.length - 1];
+    e.ammo = 0;
+    p.x = 35.5 * 32; p.y = 22.5 * 32;
+    S.alertNoise(noise.x, noise.y);
+    const before = Math.hypot(e.x - noise.x, e.y - noise.y);
+    for (let i = 0; i < 90; i++) S.updateEnemy(e, 1/60);
+    const after = Math.hypot(e.x - noise.x, e.y - noise.y);
+    return { before, after };
+  }`);
+  check('pathfinds around walls to a noise', r.after < r.before - 60,
+    `dist ${Math.round(r.before)} -> ${Math.round(r.after)}`);
+
   // --- 5. unparried melee strike kills ---
   await begin();
   r = await scene(`(S) => {

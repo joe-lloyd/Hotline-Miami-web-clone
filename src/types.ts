@@ -116,6 +116,10 @@ export interface EnemyState {
   hadLOS: boolean;
   /** time spent scanning at a stale lastSeen before giving up */
   searchT: number;
+  /** BFS waypoints (tile centers) toward the current nav target */
+  path: { x: number; y: number }[] | null;
+  /** countdown until the path is recomputed */
+  pathT: number;
 }
 
 export interface BulletState {

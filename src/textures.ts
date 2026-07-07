@@ -54,12 +54,12 @@ function makeBar(scene: Phaser.Scene, key: string, color: number): void {
   g.destroy();
 }
 
-function makeDot(scene: Phaser.Scene, key: string, color: number): void {
+function makeDot(scene: Phaser.Scene, key: string, color: number, r = 3): void {
   if (scene.textures.exists(key)) return;
   const g = g2(scene);
   g.fillStyle(color, 1);
-  g.fillCircle(3 * RES, 3 * RES, 3 * RES);
-  g.generateTexture(key, 6 * RES, 6 * RES);
+  g.fillCircle(r * RES, r * RES, r * RES);
+  g.generateTexture(key, r * 2 * RES, r * 2 * RES);
   g.destroy();
 }
 
@@ -194,33 +194,37 @@ export function makeCharTextures(scene: Phaser.Scene, pal: CharPalette): PalKeys
   const torso = (key: string, f: number) => {
     const g = g2(scene);
     const cx = 10 * R, cy = 11 * R;
-    const shW = fem ? 2.7 : 3.1;              // shoulder cap radius
-    const bodyW = fem ? 13.6 : 15.2;          // along facing
-    const bodyH = fem ? 16.2 : 18;            // shoulder span
+    // fem: slim athletic build — shallow front-to-back, shoulder caps
+    // wider than the tapered core so it reads lean, not round. Head and
+    // bust stay round on purpose.
+    const shW = fem ? 2.4 : 3.1;              // shoulder cap radius
+    const shY = fem ? 6.9 : 7;                // shoulder offset from spine
+    const bodyW = fem ? 9.4 : 15.2;           // along facing (depth)
+    const bodyH = fem ? 15.6 : 18;            // shoulder span
     g.lineStyle(1.6 * R, shade(pal.jdark, f), 1);
     g.fillStyle(shade(pal.jacket, f), 1);
     // shoulder caps
-    g.fillCircle(cx - 1.5 * R, cy - 7 * R, shW * R);
-    g.strokeCircle(cx - 1.5 * R, cy - 7 * R, shW * R);
-    g.fillCircle(cx - 1.5 * R, cy + 7 * R, shW * R);
-    g.strokeCircle(cx - 1.5 * R, cy + 7 * R, shW * R);
+    g.fillCircle(cx - 1.5 * R, cy - shY * R, shW * R);
+    g.strokeCircle(cx - 1.5 * R, cy - shY * R, shW * R);
+    g.fillCircle(cx - 1.5 * R, cy + shY * R, shW * R);
+    g.strokeCircle(cx - 1.5 * R, cy + shY * R, shW * R);
     // torso
     g.fillEllipse(cx - 0.5 * R, cy, bodyW * R, bodyH * R);
     g.strokeEllipse(cx - 0.5 * R, cy, bodyW * R, bodyH * R);
     if (fem) {
-      // bust: sticks out a little ahead of the chest, seen from above
+      // bust: round, sticking out a little ahead of the chest
       g.lineStyle(1.2 * R, shade(pal.jdark, f), 1);
-      g.fillCircle(cx + 5.6 * R, cy - 2.5 * R, 2.5 * R);
-      g.strokeCircle(cx + 5.6 * R, cy - 2.5 * R, 2.5 * R);
-      g.fillCircle(cx + 5.6 * R, cy + 2.5 * R, 2.5 * R);
-      g.strokeCircle(cx + 5.6 * R, cy + 2.5 * R, 2.5 * R);
+      g.fillCircle(cx + 4.2 * R, cy - 2.2 * R, 2.5 * R);
+      g.strokeCircle(cx + 4.2 * R, cy - 2.2 * R, 2.5 * R);
+      g.fillCircle(cx + 4.2 * R, cy + 2.2 * R, 2.5 * R);
+      g.strokeCircle(cx + 4.2 * R, cy + 2.2 * R, 2.5 * R);
     }
     // soft highlight toward the light (reads as rounded shoulders/back)
     g.fillStyle(shade(pal.jacket, f * 1.22), 1);
-    g.fillEllipse(cx - 2.2 * R, cy - 1.2 * R, (bodyW - 6) * R, (bodyH - 9) * R);
+    g.fillEllipse(cx - 2.2 * R, cy - 1.2 * R, (bodyW - (fem ? 4 : 6)) * R, (bodyH - (fem ? 8 : 9)) * R);
     // zip line
     g.lineStyle(1.1 * R, shade(pal.jdark, f), 1);
-    g.lineBetween(cx + 2.5 * R, cy, cx + (fem ? 5.4 : 6.8) * R, cy);
+    g.lineBetween(cx + 1.5 * R, cy, cx + (fem ? 3.8 : 6.8) * R, cy);
     g.generateTexture(key, 20 * R, 22 * R);
     g.destroy();
   };
@@ -231,17 +235,32 @@ export function makeCharTextures(scene: Phaser.Scene, pal: CharPalette): PalKeys
     const g = g2(scene);
     const cx = 7 * R, cy = 7 * R;
     if (fem) {
-      // ponytail trailing behind the head
-      g.fillStyle(shade(pal.hair, f * 0.85), 1);
-      g.fillEllipse(cx - 5.2 * R, cy, 4.6 * R, 3.4 * R);
+      // pixie cut: hair caps the whole crown (skin first, hair OVER it —
+      // otherwise the face circle reads as a bald spot from above), with
+      // just a sliver of forehead showing at the front. Head kept a bit
+      // smaller than the male heads so her athletic frame reads.
+      g.fillStyle(shade(pal.skin, f), 1);
+      g.fillCircle(cx + 1.8 * R, cy, 3.7 * R);
+      g.fillStyle(shade(pal.hair, f), 1);
+      g.fillCircle(cx - 0.4 * R, cy, 5.1 * R);
+      // choppy points: swept fringe + side wisps over the ears + short nape
+      g.fillEllipse(cx + 3.2 * R, cy - 2.3 * R, 3.9 * R, 2.1 * R);
+      g.fillEllipse(cx + 2.7 * R, cy + 2.8 * R, 3 * R, 1.8 * R);
+      g.fillTriangle(cx + 0.9 * R, cy - 4.4 * R, cx + 4.8 * R, cy - 3.9 * R, cx + 1.3 * R, cy - 2.3 * R);
+      g.fillEllipse(cx - 5.2 * R, cy, 2.5 * R, 3.2 * R);
+      // sheen: strong enough to read on near-black hair
+      g.fillStyle(shade(pal.hair, f * 2.1), 1);
+      g.fillEllipse(cx - 1.6 * R, cy - 1.4 * R, 3.5 * R, 1.9 * R);
+      g.fillEllipse(cx - 3 * R, cy + 1.7 * R, 2.1 * R, 1.1 * R);
+    } else {
+      g.fillStyle(shade(pal.hair, f), 1);
+      g.fillCircle(cx - 0.8 * R, cy, 5.7 * R);
+      g.fillStyle(shade(pal.skin, f), 1);
+      g.fillCircle(cx + 1.6 * R, cy, 4.4 * R);
+      // hair sheen — the top of the head catches the neon
+      g.fillStyle(shade(pal.hair, f * 1.35), 1);
+      g.fillEllipse(cx - 2.6 * R, cy - 1.8 * R, 4.2 * R, 2.6 * R);
     }
-    g.fillStyle(shade(pal.hair, f), 1);
-    g.fillCircle(cx - 0.8 * R, cy, 5.7 * R);
-    g.fillStyle(shade(pal.skin, f), 1);
-    g.fillCircle(cx + 1.6 * R, cy, 4.4 * R);
-    // hair sheen — the top of the head catches the neon
-    g.fillStyle(shade(pal.hair, f * 1.35), 1);
-    g.fillEllipse(cx - 2.6 * R, cy - 1.8 * R, 4.2 * R, 2.6 * R);
     g.generateTexture(key, 14 * R, 14 * R);
     g.destroy();
   };
@@ -262,7 +281,8 @@ export function makeCharTextures(scene: Phaser.Scene, pal: CharPalette): PalKeys
 
   makeBar(scene, keys.sleeve, shade(pal.jdark, 1.15));
   makeBar(scene, keys.leg, shade(pal.pants, 1.9));
-  makeDot(scene, keys.hand, hexNum(pal.skin));
+  // slimmer hands on the athletic build
+  makeDot(scene, keys.hand, hexNum(pal.skin), fem ? 2.4 : 3);
 
   return keys;
 }
