@@ -4,10 +4,12 @@
  * PlayScene keeps its simulation in plain public state, so the test can
  * teleport enemies, inject bullets and step subsystems deterministically.
  *
- * Covers: gun kills + drops + score, bullet parry (deflect/slow-mo/score),
- * unparried deaths, melee windup parry -> stagger -> execution bonus,
- * armored heavies, thrown-weapon stagger, door kick stagger + door
- * open/solid rules, floor clear -> exit -> next floor, and the win flow.
+ * Covers: gun kills + drops + score, bullet parry (deflect/slow-mo/score,
+ * weapon required — fists can't deflect), unparried deaths, melee windup
+ * parry -> stagger -> execution bonus, punch knockdown -> head stomp,
+ * directional vision (sneaking up from behind) + reaction delay, armored
+ * heavies, thrown-weapon stagger, door kick stagger + door open/solid
+ * rules, floor clear -> exit -> next floor, and the win flow.
  */
 import puppeteer from 'puppeteer-core';
 
@@ -63,11 +65,12 @@ try {
   check('score awarded', r.gain > 0, 'gain=' + r.gain);
   check('weapon dropped', r.drop === 1);
 
-  // --- 2. bullet parry deflects ---
+  // --- 2. bullet parry deflects (holding a weapon) ---
   r = await scene(`(S) => {
     const p = S.player;
     S.bullets.length = 0;
     S.bullets.push({ x: p.x + 30, y: p.y, vx: -600, vy: 0, life: 1.4, friendly: false, dmg: 1 });
+    p.weapon = 'pistol';
     p.parryT = 0.2;
     const before = S.score;
     S.updateBullets(1/60);
@@ -76,6 +79,21 @@ try {
   }`);
   check('parry deflects bullet', r.friendly && r.alive);
   check('parry score + slow-mo', r.gain === 50 && r.slow, 'gain=' + r.gain);
+
+  // --- 2b. bare fists can NOT deflect bullets ---
+  r = await scene(`(S) => {
+    const p = S.player;
+    S.bullets.length = 0;
+    S.bullets.push({ x: p.x + 40, y: p.y, vx: -600, vy: 0, life: 1.4, friendly: false, dmg: 1 });
+    p.weapon = 'fists';
+    p.parryT = 0.2;
+    S.updateBullets(1/60);
+    const b = S.bullets[0];
+    const stillHostile = !!b && !b.friendly;
+    S.bullets.length = 0;
+    return { stillHostile, alive: p.alive };
+  }`);
+  check('fists cannot parry bullets', r.stillHostile && r.alive);
 
   // --- 3. unparried bullet kills -> death overlay ---
   await begin();
@@ -111,6 +129,59 @@ try {
   }`);
   check('parried melee staggers attacker', r.staggered && r.playerAlive);
   check('staggered enemy executed in one hit', r.dead, 'points=' + r.gain);
+
+  // --- 4b. punch knocks down; stomp finishes ---
+  await begin();
+  r = await scene(`(S) => {
+    const p = S.player;
+    S.spawnEnemy('goon', p.x + 30, p.y);
+    const e = S.enemies[S.enemies.length - 1];
+    p.weapon = 'fists'; p.ang = 0; p.atkT = 0; p.chainT = 0;
+    S.meleeAttack();
+    const downed = e.downed && e.alive;
+    const before = S.score;
+    S.meleeAttack(); // downed enemy in reach -> head stomp
+    return { downed, dead: !e.alive, gain: S.score - before };
+  }`);
+  check('punch knocks down instead of killing', r.downed);
+  check('stomp executes downed enemy', r.dead && r.gain > 0, 'gain=' + r.gain);
+
+  // --- 4c. directional vision: sneaking up from behind + reaction lag ---
+  r = await scene(`(S) => {
+    const p = S.player;
+    S.spawnEnemy('gunner', p.x + 100, p.y);
+    const e = S.enemies[S.enemies.length - 1];
+    e.ammo = 0;               // never actually fires during later checks
+    e.ang = 0; e.patrolT = 9; // facing away from the player
+    S.updateEnemy(e, 1/60);
+    const unseen = !e.aware;
+    e.ang = Math.PI;          // now facing the player
+    S.updateEnemy(e, 1/60);
+    return { unseen, seen: e.aware, react: e.react };
+  }`);
+  check('enemy facing away does not spot you', r.unseen);
+  check('spotting you takes reaction time', r.seen && r.react >= 0.25, 'react=' + (r.react ?? 0).toFixed(2));
+
+  // --- 4d. gunshot noise sends distant enemies to investigate ---
+  r = await scene(`(S) => {
+    const p = S.player;
+    const noise = { x: p.x, y: p.y };
+    S.spawnEnemy('gunner', p.x + 220, p.y);
+    const e = S.enemies[S.enemies.length - 1];
+    e.ammo = 0;
+    e.aware = false; e.lastSeen = null; e.hadLOS = false;
+    // park the player far away so only the SOUND draws the gunner in
+    // (otherwise it opens the door, sees you, and correctly holds range)
+    p.x = 35.5 * 32; p.y = 22.5 * 32;
+    S.alertNoise(noise.x, noise.y);
+    const heard = e.aware && !!e.lastSeen;
+    const before = Math.hypot(e.x - noise.x, e.y - noise.y);
+    for (let i = 0; i < 60; i++) S.updateEnemy(e, 1/60);
+    const after = Math.hypot(e.x - noise.x, e.y - noise.y);
+    return { heard, before, after };
+  }`);
+  check('gunner hears shot and investigates', r.heard && r.after < r.before - 40,
+    `dist ${Math.round(r.before)} -> ${Math.round(r.after)}`);
 
   // --- 5. unparried melee strike kills ---
   await begin();

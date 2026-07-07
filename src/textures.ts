@@ -173,6 +173,11 @@ export interface PalKeys {
 /**
  * Build (or fetch) the palette-specific parts. Legs are drawn brighter
  * than the pants color so they read against the dark neon floors.
+ *
+ * Bodies are drawn facing +x (the aim direction). `pal.fem` builds the
+ * feminine silhouette: narrower shoulders, a bust that sticks out a
+ * little ahead of the chest, and a ponytail behind the head — so the
+ * player clearly reads as a woman from above.
  */
 export function makeCharTextures(scene: Phaser.Scene, pal: CharPalette): PalKeys {
   const id = pal.jacket;
@@ -184,20 +189,38 @@ export function makeCharTextures(scene: Phaser.Scene, pal: CharPalette): PalKeys
   };
   if (scene.textures.exists(keys.torso)) return keys;
   const R = RES;
+  const fem = !!pal.fem;
 
   const torso = (key: string, f: number) => {
     const g = g2(scene);
     const cx = 10 * R, cy = 11 * R;
+    const shW = fem ? 2.7 : 3.1;              // shoulder cap radius
+    const bodyW = fem ? 13.6 : 15.2;          // along facing
+    const bodyH = fem ? 16.2 : 18;            // shoulder span
     g.lineStyle(1.6 * R, shade(pal.jdark, f), 1);
     g.fillStyle(shade(pal.jacket, f), 1);
-    g.fillCircle(cx - 1.5 * R, cy - 7 * R, 3.1 * R);
-    g.strokeCircle(cx - 1.5 * R, cy - 7 * R, 3.1 * R);
-    g.fillCircle(cx - 1.5 * R, cy + 7 * R, 3.1 * R);
-    g.strokeCircle(cx - 1.5 * R, cy + 7 * R, 3.1 * R);
-    g.fillEllipse(cx - 0.5 * R, cy, 15.2 * R, 18 * R);
-    g.strokeEllipse(cx - 0.5 * R, cy, 15.2 * R, 18 * R);
+    // shoulder caps
+    g.fillCircle(cx - 1.5 * R, cy - 7 * R, shW * R);
+    g.strokeCircle(cx - 1.5 * R, cy - 7 * R, shW * R);
+    g.fillCircle(cx - 1.5 * R, cy + 7 * R, shW * R);
+    g.strokeCircle(cx - 1.5 * R, cy + 7 * R, shW * R);
+    // torso
+    g.fillEllipse(cx - 0.5 * R, cy, bodyW * R, bodyH * R);
+    g.strokeEllipse(cx - 0.5 * R, cy, bodyW * R, bodyH * R);
+    if (fem) {
+      // bust: sticks out a little ahead of the chest, seen from above
+      g.lineStyle(1.2 * R, shade(pal.jdark, f), 1);
+      g.fillCircle(cx + 5.6 * R, cy - 2.5 * R, 2.5 * R);
+      g.strokeCircle(cx + 5.6 * R, cy - 2.5 * R, 2.5 * R);
+      g.fillCircle(cx + 5.6 * R, cy + 2.5 * R, 2.5 * R);
+      g.strokeCircle(cx + 5.6 * R, cy + 2.5 * R, 2.5 * R);
+    }
+    // soft highlight toward the light (reads as rounded shoulders/back)
+    g.fillStyle(shade(pal.jacket, f * 1.22), 1);
+    g.fillEllipse(cx - 2.2 * R, cy - 1.2 * R, (bodyW - 6) * R, (bodyH - 9) * R);
+    // zip line
     g.lineStyle(1.1 * R, shade(pal.jdark, f), 1);
-    g.lineBetween(cx + 2.5 * R, cy, cx + 6.8 * R, cy);
+    g.lineBetween(cx + 2.5 * R, cy, cx + (fem ? 5.4 : 6.8) * R, cy);
     g.generateTexture(key, 20 * R, 22 * R);
     g.destroy();
   };
@@ -207,10 +230,18 @@ export function makeCharTextures(scene: Phaser.Scene, pal: CharPalette): PalKeys
   const head = (key: string, f: number) => {
     const g = g2(scene);
     const cx = 7 * R, cy = 7 * R;
+    if (fem) {
+      // ponytail trailing behind the head
+      g.fillStyle(shade(pal.hair, f * 0.85), 1);
+      g.fillEllipse(cx - 5.2 * R, cy, 4.6 * R, 3.4 * R);
+    }
     g.fillStyle(shade(pal.hair, f), 1);
     g.fillCircle(cx - 0.8 * R, cy, 5.7 * R);
     g.fillStyle(shade(pal.skin, f), 1);
     g.fillCircle(cx + 1.6 * R, cy, 4.4 * R);
+    // hair sheen — the top of the head catches the neon
+    g.fillStyle(shade(pal.hair, f * 1.35), 1);
+    g.fillEllipse(cx - 2.6 * R, cy - 1.8 * R, 4.2 * R, 2.6 * R);
     g.generateTexture(key, 14 * R, 14 * R);
     g.destroy();
   };
@@ -219,16 +250,18 @@ export function makeCharTextures(scene: Phaser.Scene, pal: CharPalette): PalKeys
 
   const foot = (key: string, f: number) => {
     const g = g2(scene);
-    g.fillStyle(shade(pal.pants, 1.6 * f), 1);
-    g.fillRoundedRect(0, 0, 7 * R, 5 * R, 2 * R);
-    g.generateTexture(key, 7 * R, 5 * R);
+    g.fillStyle(shade(pal.pants, 1.7 * f), 1);
+    g.fillRoundedRect(0, 0, 8 * R, 5.5 * R, 2.2 * R);
+    g.fillStyle(shade(pal.pants, 2.1 * f), 1);
+    g.fillRoundedRect(4.5 * R, 0.6 * R, 3.2 * R, 4.3 * R, 1.6 * R); // toe cap
+    g.generateTexture(key, 8 * R, 5.5 * R);
     g.destroy();
   };
   foot(keys.foot, 1);
   foot(keys.footDark, 0.6);
 
   makeBar(scene, keys.sleeve, shade(pal.jdark, 1.15));
-  makeBar(scene, keys.leg, shade(pal.pants, 1.7));
+  makeBar(scene, keys.leg, shade(pal.pants, 1.9));
   makeDot(scene, keys.hand, hexNum(pal.skin));
 
   return keys;

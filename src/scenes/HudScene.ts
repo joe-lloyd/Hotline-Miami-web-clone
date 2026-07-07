@@ -48,7 +48,7 @@ export class HudScene extends Phaser.Scene {
     this.comboText = t(VIEW_W / 2, 40, 18, '#ff2d95').setOrigin(0.5);
     this.clearText = t(VIEW_W / 2, 84, 11, '#00e5ff').setOrigin(0.5).setText('FLOOR CLEAR — GET TO THE EXIT');
     this.hintText = t(VIEW_W / 2, VIEW_H - 20, 10, 'rgba(231,200,255,.35)', TECH).setOrigin(0.5)
-      .setText('WASD move · CLICK attack · SHIFT dodge · R-CLICK/F/Q parry · E pick up/throw · ESC pause');
+      .setText('WASD move · CLICK attack · punch downs, stomp finishes · SHIFT dodge · R-CLICK/F parry (bullets need a weapon) · E pick up/throw · ESC pause');
   }
 
   update(): void {

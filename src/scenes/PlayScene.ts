@@ -19,12 +19,15 @@
  *
  * The static world (floor checkerboard, walls, neon trim) is rendered
  * once into a generated texture per floor; per-frame drawing is limited
- * to two Graphics layers (vision cones under actors, fx above them).
+ * to one fx Graphics layer above the actors (plus a red kill-pulse
+ * rectangle between the floor and the blood decals).
  */
 import Phaser from 'phaser';
 import {
   TILE, ZOOM, CAM, PLAYER, PLAYER_PAL, COMBO_TIME, PARRY_SCORE, EXECUTE_BONUS,
-  GUNSHOT_NOISE, STAGGER_TIME, KICK_RADIUS, KICK_SCORE,
+  GUNSHOT_NOISE, KICK_NOISE, STAGGER_TIME, KICK_RADIUS, KICK_SCORE,
+  COLLIDE, WALL_INSET, ENEMY_FOV, CLOSE_SENSE, SEARCH_TIME,
+  DOWN_TIME, STOMP_RANGE, KILL_FLASH,
 } from '../config';
 import { WEAPONS } from '../data/weapons';
 import { ENEMY_TYPES } from '../data/enemies';
@@ -71,13 +74,14 @@ export class PlayScene extends Phaser.Scene {
   over = false;          // death/exit already fired
   ts = 1;                // timescale (slow-mo)
   slowT = 0;
+  killFlash = 0;         // red background pulse timer (kills)
 
   // --- visuals ---
   private playerRig!: CharacterRig;
   private rigs = new Map<EnemyState, CharacterRig>();
   private doorMap = new Map<string, Door>();
   private fxG!: Phaser.GameObjects.Graphics;
-  private coneG!: Phaser.GameObjects.Graphics;
+  private redPulse!: Phaser.GameObjects.Rectangle;
   private decalRT!: Phaser.GameObjects.RenderTexture;
   private stampG!: Phaser.GameObjects.Graphics;
   private exitText!: Phaser.GameObjects.Text;
@@ -111,15 +115,17 @@ export class PlayScene extends Phaser.Scene {
     this.doors = []; this.rigs.clear(); this.doorMap.clear();
     this.combo = 0; this.comboT = 0;
     this.cleared = false; this.over = false;
-    this.ts = 1; this.slowT = 0;
+    this.ts = 1; this.slowT = 0; this.killFlash = 0;
     this.mouseDown = false;
     this.attackTap = this.dashTap = this.parryTap = this.pickTap = false;
 
     this.buildWorldImage();
 
+    // red kill-pulse: sits on the floor, under blood decals and actors
+    this.redPulse = this.add.rectangle(0, 0, lvl.worldW, lvl.worldH, 0xff0f30)
+      .setOrigin(0, 0).setDepth(0.5).setAlpha(0);
     this.decalRT = this.add.renderTexture(0, 0, lvl.worldW, lvl.worldH).setOrigin(0, 0).setDepth(1);
     this.stampG = this.add.graphics().setVisible(false);
-    this.coneG = this.add.graphics().setDepth(2);
     this.fxG = this.add.graphics().setDepth(7);
 
     // doors
@@ -137,7 +143,7 @@ export class PlayScene extends Phaser.Scene {
       weapon: 'fists', ammo: 0, alive: true,
       dashT: 0, dashCd: 0, dashDX: 0, dashDY: 0, inv: 0,
       parryT: 0, parryCd: 0, parryFx: 0,
-      atkT: 0, swing: 0,
+      atkT: 0, swing: 0, chainT: 0,
     };
     this.playerRig = new CharacterRig(this, this.player.x, this.player.y, PLAYER_PAL, PLAYER.r);
     this.playerRig.setDepth(6);
@@ -167,14 +173,22 @@ export class PlayScene extends Phaser.Scene {
   private buildWorldImage(): void {
     const key = 'world-' + this.levelIndex;
     if (!this.textures.exists(key)) {
-      const lvl = this.lvl, T = TILE;
+      const lvl = this.lvl, T = TILE, I = WALL_INSET;
+      const open = (x: number, y: number) =>
+        y >= 0 && y < lvl.H && x >= 0 && x < lvl.W && lvl.grid[y][x] === 0;
       const g = this.add.graphics().setVisible(false);
       for (let y = 0; y < lvl.H; y++) for (let x = 0; x < lvl.W; x++) {
         if (lvl.grid[y][x] === 1) {
-          g.fillStyle(0x2a0f3d, 1);
+          // wall faces that touch floor are inset so walls read thinner
+          // and doorways wider (visual only — collision stays full-tile)
+          const t = open(x, y - 1) ? I : 0, b = open(x, y + 1) ? I : 0;
+          const l = open(x - 1, y) ? I : 0, r = open(x + 1, y) ? I : 0;
+          g.fillStyle(hexNum(((x + y) & 1) ? this.L.floorA : this.L.floorB), 1);
           g.fillRect(x * T, y * T, T, T);
+          g.fillStyle(0x2a0f3d, 1);
+          g.fillRect(x * T + l, y * T + t, T - l - r, T - t - b);
           g.fillStyle(0x1c0a2a, 1);
-          g.fillRect(x * T, y * T + T - 6, T, 6);
+          g.fillRect(x * T + l, y * T + T - b - 5, T - l - r, 5);
         } else {
           g.fillStyle(hexNum(((x + y) & 1) ? this.L.floorA : this.L.floorB), 1);
           g.fillRect(x * T, y * T, T, T);
@@ -219,6 +233,7 @@ export class PlayScene extends Phaser.Scene {
       react: 0, cd: 0, windup: 0, atkCd: 0, stun: 0, hitFlash: 0,
       rush: def.behavior === 'melee',
       patrolT: 0, pvx: 0, pvy: 0,
+      downed: false, downT: 0, hadLOS: false, searchT: 0,
     };
     this.enemies.push(e);
     const rig = new CharacterRig(this, x, y, def.pal, def.r);
@@ -247,16 +262,36 @@ export class PlayScene extends Phaser.Scene {
   }
 
   private circleWall(x: number, y: number, r: number): boolean {
-    for (const [ox, oy] of [[-r, -r], [r, -r], [-r, r], [r, r], [0, 0]])
+    const c = r * COLLIDE.cornerR;
+    for (const [ox, oy] of [
+      [-c, -c], [c, -c], [-c, c], [c, c],        // rounded corners
+      [-r, 0], [r, 0], [0, -r], [0, r], [0, 0],  // axis faces + center
+    ])
       if (this.solid(x + ox, y + oy)) return true;
     return false;
   }
 
+  /** One-axis move with corner slip: when blocked, probe perpendicular
+   *  nudges so off-center doorway approaches glide in instead of snagging
+   *  on the frame. */
+  private slideAxis(ent: Body, dx: number, dy: number): void {
+    const nx = ent.x + dx, ny = ent.y + dy;
+    if (!this.circleWall(nx, ny, ent.r)) { ent.x = nx; ent.y = ny; return; }
+    const slip = COLLIDE.slipFrac * (Math.abs(dx) + Math.abs(dy));
+    for (const m of [1, 2]) for (const s of [1, -1]) {
+      const px = dx ? 0 : slip * s * m;
+      const py = dx ? slip * s * m : 0;
+      if (!this.circleWall(ent.x + px, ent.y + py, ent.r) &&
+          !this.circleWall(nx + px, ny + py, ent.r)) {
+        ent.x = nx + px; ent.y = ny + py;
+        return;
+      }
+    }
+  }
+
   moveEntity(ent: Body, dx: number, dy: number): void {
-    const nx = ent.x + dx;
-    if (!this.circleWall(nx, ent.y, ent.r)) ent.x = nx;
-    const ny = ent.y + dy;
-    if (!this.circleWall(ent.x, ny, ent.r)) ent.y = ny;
+    if (dx) this.slideAxis(ent, dx, 0);
+    if (dy) this.slideAxis(ent, 0, dy);
     if (dx || dy) { ent.moving = true; ent.moveAng = Math.atan2(dy, dx); }
   }
 
@@ -339,7 +374,7 @@ export class PlayScene extends Phaser.Scene {
     if (this.keysObj.D.isDown) mx += 1;
     const ml = Math.hypot(mx, my) || 1; mx /= ml; my /= ml;
 
-    p.dashCd -= dt; p.inv -= dt; p.atkT -= dt;
+    p.dashCd -= dt; p.inv -= dt; p.atkT -= dt; p.chainT -= dt;
     p.parryCd -= dt; p.parryT -= dt; p.parryFx -= dt;
     if (p.dashT > 0) p.dashT -= dt;
     if (p.swing > 0) p.swing -= dt;
@@ -380,7 +415,7 @@ export class PlayScene extends Phaser.Scene {
       p.wphase += dt * 20;
     } else if (mx || my) {
       // walking into a closed door pushes it open
-      const door = this.doorAhead(p, Math.atan2(my, mx), 6);
+      const door = this.doorAhead(p, Math.atan2(my, mx), 10);
       if (door) { door.open(false); audio.sfx('doorOpen'); }
       this.moveEntity(p, mx * PLAYER.speed * dt, my * PLAYER.speed * dt);
       p.wphase += dt * 11;
@@ -404,6 +439,7 @@ export class PlayScene extends Phaser.Scene {
   kickDoor(door: Door): void {
     door.open(true);
     audio.sfx('kick');
+    this.alertNoise(door.cx, door.cy, KICK_NOISE);
     this.shake(8, 0.15);
     this.playerRig.playKick(Math.atan2(door.cy - this.player.y, door.cx - this.player.x));
     // anyone close behind the door gets staggered
@@ -440,7 +476,9 @@ export class PlayScene extends Phaser.Scene {
         }
       } else {
         const d = Math.hypot(p.x - b.x, p.y - b.y);
-        if (p.alive && p.parryT > 0 && d < PLAYER.parryRadius) {
+        // bullets can only be deflected with something in your hands —
+        // bare fists still parry melee, but not gunfire
+        if (p.alive && p.parryT > 0 && p.weapon !== 'fists' && d < PLAYER.parryRadius) {
           this.deflectBullet(b);
           continue;
         }
@@ -508,7 +546,8 @@ export class PlayScene extends Phaser.Scene {
       if (d < bd) { bd = d; best = pk; }
     }
     if (!best) return false;
-    if (p.weapon !== 'fists') this.spawnPickup(p.weapon, p.x, p.y);
+    // swapping always THROWS the old weapon at whatever you're aiming at
+    if (p.weapon !== 'fists') this.throwWeapon();
     p.weapon = best.st.w;
     p.ammo = WEAPONS[best.st.w].ammo ?? 0;
     best.spr.destroy(); best.glow.destroy();
@@ -541,7 +580,23 @@ export class PlayScene extends Phaser.Scene {
   meleeAttack(): void {
     const p = this.player;
     const w = WEAPONS[p.weapon];
-    p.atkT = w.cd; p.swing = 0.16;
+    // chained swings inside the combo window use the faster follow-up cd
+    p.atkT = p.chainT > 0 ? (w.cd2 ?? w.cd) : w.cd;
+    p.chainT = p.atkT + 0.75;
+    p.swing = 0.16;
+
+    // a downed enemy in reach gets the head stomp — the only way to
+    // finish what a punch started
+    for (const e of this.enemies) {
+      if (!e.alive || !e.downed) continue;
+      if (Math.hypot(e.x - p.x, e.y - p.y) < e.r + STOMP_RANGE) {
+        this.playerRig.playKick(Math.atan2(e.y - p.y, e.x - p.x));
+        this.killEnemy(e, Math.cos(p.ang) * 240, Math.sin(p.ang) * 240, true);
+        this.shake(7, 0.12);
+        return;
+      }
+    }
+
     this.playerRig.playSwing(0.18);
     audio.sfx('punch');
     let hit = false;
@@ -552,7 +607,10 @@ export class PlayScene extends Phaser.Scene {
         const a = Math.atan2(e.y - p.y, e.x - p.x);
         const da = Math.abs(((a - p.ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
         if (da < (w.arc ?? 1.5) / 2) {
-          this.damageEnemy(e, w.dmg, Math.cos(p.ang) * 400, Math.sin(p.ang) * 400);
+          // punches floor people instead of killing — unless the target is
+          // staggered from a parry, then anything (fists included) executes
+          if (w.nonlethal && e.stun <= 0) this.knockdown(e, p.ang);
+          else this.damageEnemy(e, w.dmg, Math.cos(p.ang) * 400, Math.sin(p.ang) * 400);
           hit = true;
         }
       }
@@ -561,6 +619,19 @@ export class PlayScene extends Phaser.Scene {
     const door = this.doorAhead(p, p.ang, (w.range ?? 38) * 0.6);
     if (door) this.kickDoor(door);
     if (hit) this.shake(6, 0.12);
+  }
+
+  /** A punch floors an enemy: helpless until downT runs out. */
+  knockdown(e: EnemyState, ang: number): void {
+    e.downed = true;
+    e.downT = DOWN_TIME;
+    e.windup = 0;
+    e.aware = true;
+    e.hitFlash = 0.15;
+    this.moveEntity(e, Math.cos(ang) * 9, Math.sin(ang) * 9);
+    this.rigs.get(e)?.knockdown(ang);
+    audio.sfx('stagger');
+    this.spawnSpark(e.x, e.y, 0xffd23f);
   }
 
   fireGun(): void {
@@ -591,16 +662,36 @@ export class PlayScene extends Phaser.Scene {
     e.moving = false;
     e.wphase += dt * 10;
 
+    // floored by a punch: helpless until they scramble back up
+    if (e.downed) {
+      e.downT -= dt;
+      if (e.downT <= 0) {
+        e.downed = false;
+        e.stun = 0.35; // groggy moment on the way up
+        this.rigs.get(e)?.standUp();
+      }
+      return;
+    }
+
     if (e.stun > 0) { e.stun -= dt; return; }
 
+    // --- senses: vision is directional, so you can sneak up from behind ---
     const dToP = Math.hypot(p.x - e.x, p.y - e.y);
-    const los = dToP < def.sight && this.lineClear(e.x, e.y, p.x, p.y);
+    let los = dToP < def.sight && this.lineClear(e.x, e.y, p.x, p.y);
+    if (los && !e.aware && dToP > CLOSE_SENSE) {
+      const aTo = Math.atan2(p.y - e.y, p.x - e.x);
+      const da = Math.abs(((aTo - e.ang + Math.PI * 3) % (Math.PI * 2)) - Math.PI);
+      if (da > (def.fov ?? ENEMY_FOV) / 2) los = false;
+    }
     if (los && !e.aware) {
       e.aware = true; e.alertT = 0.6;
-      e.react = def.react ?? 0.24;
       audio.sfx('alert');
     }
-    if (los) e.lastSeen = { x: p.x, y: p.y };
+    // reaction lag every time you come (back) into view — nobody snipes you
+    // through a door that's still swinging open
+    if (los && !e.hadLOS) e.react = Math.max(e.react, (def.react ?? 0.3) * (0.6 + Math.random() * 0.8));
+    e.hadLOS = los;
+    if (los) { e.lastSeen = { x: p.x, y: p.y }; e.searchT = 0; }
 
     if (!e.aware) {
       e.patrolT -= dt;
@@ -611,6 +702,20 @@ export class PlayScene extends Phaser.Scene {
       }
       this.moveEntity(e, e.pvx * def.patrolSpeed * dt, e.pvy * def.patrolSpeed * dt);
       return;
+    }
+
+    // aware but blind: investigate the last seen/heard position; once
+    // there, scan around and eventually give up back to patrol
+    if (!los && e.lastSeen) {
+      const dL = Math.hypot(e.lastSeen.x - e.x, e.lastSeen.y - e.y);
+      if (dL < 20) {
+        e.searchT += dt;
+        e.ang += dt * 2.4;
+        if (e.searchT > SEARCH_TIME) {
+          e.aware = false; e.lastSeen = null; e.searchT = 0;
+        }
+        return;
+      }
     }
 
     const tgt = los ? p : (e.lastSeen ?? p);
@@ -626,9 +731,14 @@ export class PlayScene extends Phaser.Scene {
     if (ranged) {
       e.react -= dt; e.cd -= dt;
       const range = def.range ?? 230;
-      if (dToP > range + 30) this.moveEntity(e, Math.cos(ang) * def.speed * dt, Math.sin(ang) * def.speed * dt);
-      else if (dToP < range - 60) this.moveEntity(e, -Math.cos(ang) * def.speed * 0.8 * dt, -Math.sin(ang) * def.speed * 0.8 * dt);
-      if (los && e.react <= 0 && e.cd <= 0 && e.ammo > 0) {
+      if (!los) {
+        // hunt: push toward the last known position to regain a firing line
+        this.moveEntity(e, Math.cos(ang) * def.speed * dt, Math.sin(ang) * def.speed * dt);
+        return;
+      }
+      if (dToP > range - 30) this.moveEntity(e, Math.cos(ang) * def.speed * dt, Math.sin(ang) * def.speed * dt);
+      else if (dToP < range - 90) this.moveEntity(e, -Math.cos(ang) * def.speed * 0.8 * dt, -Math.sin(ang) * def.speed * 0.8 * dt);
+      if (e.react <= 0 && e.cd <= 0 && e.ammo > 0) {
         this.enemyShoot(e, ang);
         e.cd = def.fireCd ?? 0.6;
         e.ammo--;
@@ -689,19 +799,18 @@ export class PlayScene extends Phaser.Scene {
     audio.sfx('eshoot');
   }
 
-  alertNoise(x: number, y: number): void {
+  /** Everyone in earshot — gunners included — comes to investigate. */
+  alertNoise(x: number, y: number, radius = GUNSHOT_NOISE): void {
     for (const e of this.enemies) {
-      if (e.alive && !e.aware && Math.hypot(e.x - x, e.y - y) < GUNSHOT_NOISE) {
-        e.aware = true;
-        e.alertT = 0.6;
-        e.react = (ENEMY_TYPES[e.type].react ?? 0.24) + 0.15;
-        e.lastSeen = { x, y };
-      }
+      if (!e.alive || Math.hypot(e.x - x, e.y - y) >= radius) continue;
+      if (!e.aware) { e.aware = true; e.alertT = 0.6; }
+      // enemies that can't currently see you re-route to the newest sound
+      if (!e.hadLOS) { e.lastSeen = { x, y }; e.searchT = 0; }
     }
   }
 
   damageEnemy(e: EnemyState, dmg: number, kx: number, ky: number): void {
-    const executed = e.stun > 0;
+    const executed = e.stun > 0 || e.downed;
     if (executed) dmg = 999;
     e.hp -= dmg;
     if (e.hp <= 0) { this.killEnemy(e, kx, ky, executed); return; }
@@ -735,6 +844,8 @@ export class PlayScene extends Phaser.Scene {
     let pts = def.score * this.combo;
     if (executed) pts *= EXECUTE_BONUS;
     this.score += pts;
+    // the whole floor pulses red — killing should land like a hit
+    this.killFlash = KILL_FLASH + Math.min(0.25, this.combo * 0.03);
     audio.sfx(executed ? 'execute' : (this.combo > 1 ? 'combo' : 'kill'), this.combo);
     this.shake(5, 0.1);
   }
@@ -807,6 +918,10 @@ export class PlayScene extends Phaser.Scene {
       });
     }
 
+    // red kill pulse fades in real time (unaffected by slow-mo)
+    if (this.killFlash > 0) this.killFlash -= raw;
+    this.redPulse.setAlpha(Math.max(0, Math.min(1, this.killFlash / KILL_FLASH)) * 0.34);
+
     // particles / trails / flashes advance even during death slow-down
     for (const pt of this.particles) { pt.x += pt.vx * dt; pt.y += pt.vy * dt; pt.vx *= 0.9; pt.vy *= 0.9; pt.life -= dt; }
     this.particles = this.particles.filter(pt => pt.life > 0);
@@ -831,20 +946,11 @@ export class PlayScene extends Phaser.Scene {
     this.cameras.main.setFollowOffset(-lx, -ly);
   }
 
-  /** Per-frame drawing: cones under actors, everything else above them. */
+  /** Per-frame drawing: everything on the fx layer above the actors. */
   private render(_raw: number): void {
-    const g = this.fxG, cg = this.coneG, p = this.player;
+    const g = this.fxG, p = this.player;
     g.clear();
-    cg.clear();
     const accent2 = hexNum(this.L.accent2);
-
-    // vision cones of unaware enemies
-    cg.fillStyle(accent2, 0.05);
-    for (const e of this.enemies) {
-      if (!e.alive || e.aware) continue;
-      cg.slice(e.x, e.y, 120, e.ang - 0.46, e.ang + 0.46, false);
-      cg.fillPath();
-    }
 
     // exit pad
     const T = TILE;
@@ -875,6 +981,12 @@ export class PlayScene extends Phaser.Scene {
           const a = this.time2 * 7.5 + i * 2.09;
           g.fillCircle(e.x + Math.cos(a) * 9, e.y - e.r - 7 + Math.sin(a) * 3, 1.6);
         }
+      }
+      // downed: pulsing ring says "stomp me before I get back up"
+      if (e.downed) {
+        const k = 0.5 + 0.5 * Math.sin(this.time2 * 8);
+        g.lineStyle(2, 0xffd23f, 0.25 + 0.4 * k);
+        g.strokeCircle(e.x, e.y, e.r + 9);
       }
       if (e.alertT > 0) {
         g.fillStyle(0xff2d3b, 1);

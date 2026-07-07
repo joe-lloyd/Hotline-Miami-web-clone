@@ -75,6 +75,7 @@ export class CharacterRig {
   private action: Action | null = null;
   private time = 0;
   private isCorpse = false;
+  private isDown = false;    // knocked down (punch) — sprawled but alive
 
   constructor(scene: Phaser.Scene, x: number, y: number, pal: CharPalette, r: number) {
     this.s = r / 11;
@@ -133,6 +134,7 @@ export class CharacterRig {
     const s = this.s;
 
     this.root.setPosition(st.x, st.y);
+    if (this.isDown) return; // hold the sprawled knockdown pose
     this.root.setAlpha(st.inv ? 0.6 : 1);
 
     let prog = 0;
@@ -150,9 +152,11 @@ export class CharacterRig {
     const kicking = act?.type === 'kick';
     const feetAng = kicking ? (act!.ang ?? st.aim) : (st.moving ? st.moveAng : st.aim);
     this.feetC.setRotation(feetAng - this.root.rotation);
-    const stride = st.moving ? Math.sin(st.phase) * 6 * s : 0;
-    const flx = stride, fly = -4.5 * s;
-    let frx = -stride, fry = 4.5 * s;
+    // big stride so the feet kick out past the torso silhouette — legs
+    // must actually read while running
+    const stride = st.moving ? Math.sin(st.phase) * 9.5 * s : 0;
+    const flx = stride, fly = -5.2 * s;
+    let frx = -stride, fry = 5.2 * s;
     if (kicking) {
       // right foot thrusts forward and snaps back
       const k = Math.sin(prog * Math.PI);
@@ -229,10 +233,47 @@ export class CharacterRig {
     limb.setDisplaySize(d, thick);
   }
 
+  /**
+   * Knocked down by a punch: sprawl the body (normal textures — they're
+   * alive) and freeze the pose until standUp(). Reversible, unlike toCorpse.
+   */
+  knockdown(ang: number): void {
+    if (this.isCorpse || this.isDown) return;
+    this.isDown = true;
+    this.action = null;
+    const s = this.s;
+    this.root.setRotation(ang + (Math.random() - 0.5) * 0.6);
+    this.feetC.setRotation(0);
+    this.torsoC.setRotation(0);
+    this.torsoC.setScale(1);
+    this.weaponSpr.setVisible(false);
+    this.flash.setAlpha(0);
+    this.footL.setPosition(-12 * s, 7 * s);
+    this.footR.setPosition(-13 * s, -4 * s);
+    this.poseLimb(this.legL, -3 * s, 3 * s, -12 * s, 7 * s, 3.6 * s);
+    this.poseLimb(this.legR, -3 * s, -3 * s, -13 * s, -4 * s, 3.6 * s);
+    // arms bracing, trying to push back up
+    this.handL.setPosition(7 * s, -9 * s);
+    this.handR.setPosition(8 * s, 8 * s);
+    this.poseLimb(this.armL, 2 * s, -5 * s, 7 * s, -9 * s, 4 * s);
+    this.poseLimb(this.armR, 2 * s, 5 * s, 8 * s, 8 * s, 4 * s);
+    this.head.setPosition(7 * s, 1 * s);
+  }
+
+  /** Back on their feet: resume normal per-frame posing. */
+  standUp(): void {
+    if (this.isCorpse || !this.isDown) return;
+    this.isDown = false;
+    this.root.setRotation(0);
+    this.head.setPosition(0.5 * this.s, 0);
+    this.weaponSpr.setVisible(this.weapon !== 'fists');
+  }
+
   /** Repose the same parts into a sprawled corpse. Rig stops animating. */
   toCorpse(killAng: number): void {
     if (this.isCorpse) return;
     this.isCorpse = true;
+    this.isDown = false;
     this.action = null;
     const s = this.s;
     this.root.setRotation(killAng + (Math.random() - 0.5) * 0.8);

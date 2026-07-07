@@ -30,8 +30,13 @@ export interface WeaponDef {
   range?: number;
   /** melee: swing arc in radians */
   arc?: number;
-  /** seconds between attacks */
+  /** seconds between attacks (first swing) */
   cd: number;
+  /** melee: faster cooldown for chained follow-up swings (defaults to cd) */
+  cd2?: number;
+  /** melee: hits knock enemies DOWN instead of killing (fists) — downed
+   *  enemies must be finished with a stomp; staggered targets still die */
+  nonlethal?: boolean;
   /** damage per hit / per pellet */
   dmg: number;
   /** gun fields */
@@ -59,11 +64,15 @@ export interface EnemyDef {
   /** melee telegraph time before the strike lands (parry window) */
   windup: number;
   pal: CharPalette;
+  /** field of view in radians (total). Outside it you are invisible
+   *  unless nearly touching — this is what makes sneaking up work. */
+  fov?: number;
+  /** seconds of "huh?!" before the enemy can act on first sighting you */
+  react?: number;
   /** ranged-only */
   range?: number;
   ammo?: number;
   fireCd?: number;
-  react?: number;
 }
 
 /** One floor (data/levels.ts). */
@@ -86,6 +95,8 @@ export interface PlayerState {
   dashT: number; dashCd: number; dashDX: number; dashDY: number; inv: number;
   parryT: number; parryCd: number; parryFx: number;
   atkT: number; swing: number;
+  /** melee chain window: >0 means the next swing is a follow-up (cd2) */
+  chainT: number;
 }
 
 /** Live enemy state, mutated by PlayScene. */
@@ -99,6 +110,12 @@ export interface EnemyState {
   react: number; cd: number; windup: number; atkCd: number;
   stun: number; hitFlash: number; rush: boolean;
   patrolT: number; pvx: number; pvy: number;
+  /** knocked down by a punch: helpless on the floor until downT expires */
+  downed: boolean; downT: number;
+  /** whether the enemy had line of sight last tick (react resets on regain) */
+  hadLOS: boolean;
+  /** time spent scanning at a stale lastSeen before giving up */
+  searchT: number;
 }
 
 export interface BulletState {

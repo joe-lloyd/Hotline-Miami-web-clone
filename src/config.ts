@@ -34,7 +34,7 @@ export const COLLIDE = {
  * only — the collision grid stays full-tile). Walls read thinner and
  * doorway openings read wider; the neon trim follows the inset face.
  */
-export const WALL_INSET = 3;
+export const WALL_INSET = 6;
 
 /** Camera follow feel. */
 export const CAM = {
@@ -59,13 +59,25 @@ export const PLAYER = {
 
 export const PLAYER_PAL: CharPalette = {
   jacket: '#ff2d95', jdark: '#a8175f', hair: '#ffe14a', skin: '#ffcfa8', pants: '#2a1030',
+  fem: true, // she reads as a woman from top-down: shoulders, hair, bust silhouette
 };
 
 export const COMBO_TIME = 3.2;      // seconds before a kill combo resets
 export const PARRY_SCORE = 50;      // points per deflect / parried strike
-export const EXECUTE_BONUS = 2;     // score multiplier on staggered kills
+export const EXECUTE_BONUS = 2;     // score multiplier on staggered/stomped kills
 export const GUNSHOT_NOISE = 360;   // gunshots alert every enemy in this radius
+export const KICK_NOISE = 260;      // a kicked door alerts enemies in this radius
 export const STAGGER_TIME = 1.6;    // how long a parried attacker stays helpless
+
+/** Enemy vision & senses. */
+export const ENEMY_FOV = 2.4;        // default field of view (radians, total ≈ 137°)
+export const CLOSE_SENSE = 34;       // inside this range enemies notice you regardless of facing
+export const SEARCH_TIME = 2.4;      // seconds spent scanning at a stale last-seen spot before giving up
+
+/** Punch knockdown (fists are nonlethal). */
+export const DOWN_TIME = 2.6;        // how long a punched enemy stays on the floor
+export const STOMP_RANGE = 34;       // stomp reach (added to the enemy radius)
+export const KILL_FLASH = 0.45;      // seconds the level background pulses red on a kill
 
 /** Door kick: enemies this close behind a kicked door get staggered. */
 export const KICK_RADIUS = 64;

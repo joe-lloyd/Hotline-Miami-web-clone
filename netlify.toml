@@ -1,0 +1,14 @@
+# Netlify deployment — static Vite build, no functions, no redirects needed
+# (single-page game, no client-side routing).
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+[build.environment]
+  NODE_VERSION = "20"
+
+# hashed Vite assets are immutable — cache them hard
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

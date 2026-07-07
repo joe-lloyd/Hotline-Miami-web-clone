@@ -8,11 +8,18 @@
  *
  *   behavior 'melee'  -> rushes the player; telegraphed windup strike
  *                        that can be PARRIED (windup = parry timing)
- *   behavior 'ranged' -> keeps `range` px away and shoots (ammo/fireCd/
- *                        react); switches to a melee rush when dry
+ *   behavior 'ranged' -> keeps `range` px away and shoots (ammo/fireCd);
+ *                        hunts toward the last seen/heard position when it
+ *                        has no line of sight; switches to a melee rush
+ *                        when dry
+ *
+ * Vision is directional: enemies only spot you inside `fov` radians of
+ * their facing (or if you nearly touch them), so you can sneak up from
+ * behind. `react` is the delay before they can act on first sighting you
+ * (randomized ±40% per sighting).
  *
  * hp > 1 means armored: bullets/knives do 1, bats do 2, throws do 2 and
- * stagger survivors; anything kills instantly while staggered.
+ * stagger survivors; anything kills instantly while staggered or downed.
  */
 import type { EnemyDef } from '../types';
 
@@ -36,7 +43,7 @@ export const ENEMY_TYPES: Record<string, EnemyDef> = {
   gunner: {
     char: 'u', name: 'GUNNER', behavior: 'ranged', weapon: 'pistol',
     speed: 118, patrolSpeed: 46, sight: 540, hp: 1, r: 11, score: 150,
-    range: 250, ammo: 8, fireCd: 0.55, react: 0.26, windup: 0.40,
+    range: 250, ammo: 8, fireCd: 0.55, react: 0.5, windup: 0.40,
     pal: { jacket: '#00e5ff', jdark: '#00778c', hair: '#0a2a33', skin: '#d8b48c', pants: '#06222a' },
   },
 
@@ -44,7 +51,7 @@ export const ENEMY_TYPES: Record<string, EnemyDef> = {
   heavy: {
     char: 'h', name: 'HEAVY', behavior: 'ranged', weapon: 'shotgun',
     speed: 74, patrolSpeed: 34, sight: 500, hp: 3, r: 14, score: 300,
-    range: 200, ammo: 8, fireCd: 1.10, react: 0.35, windup: 0.50,
+    range: 200, ammo: 8, fireCd: 1.10, react: 0.6, windup: 0.50,
     pal: { jacket: '#ff8a3d', jdark: '#9c4a12', hair: '#1c1208', skin: '#caa27e', pants: '#3a2210' },
   },
 };
