@@ -1,8 +1,9 @@
 /**
  * test/smoke.test.mjs — boots the real game page in headless Chrome and
- * plays it the way a user would: menu button -> briefing -> level start,
- * then raw keyboard/mouse input (move, dodge, attack, parry, pickup,
- * throw, pause). Fails on any page error or console error, and captures
+ * plays it the way a user would: menu button -> intro dialogue (advance
+ * a couple of lines, then Esc-skip) -> briefing -> board start, then raw
+ * keyboard/mouse input (move, dodge, attack, parry, pickup, throw,
+ * pause). Fails on any page error or console error, and captures
  * screenshots into test/out/ for eyeballing.
  */
 import puppeteer from 'puppeteer-core';
@@ -35,8 +36,16 @@ try {
   console.log('menu ok');
 
   await page.click('#btn-start');
+  await page.waitForSelector('#ov-dialog.on');
+  await sleep(400);
+  await page.screenshot({ path: path.join(OUT, 'smoke-1b-dialogue.png') });
+  await page.click('#ov-dialog');           // finish the typewriter
+  await sleep(150);
+  await page.click('#ov-dialog');           // next line
+  await sleep(150);
+  await page.keyboard.press('Escape');      // skip the rest of the scene
   await page.waitForSelector('#ov-briefing.on');
-  console.log('briefing ok');
+  console.log('dialogue + briefing ok');
 
   await page.click('#btn-begin');
   await sleep(600);
@@ -46,6 +55,13 @@ try {
   if (!playing) throw new Error('play scene did not start');
   await page.screenshot({ path: path.join(OUT, 'smoke-2-play.png') });
   console.log('play started');
+
+  // the smoke run tests input plumbing, not survival: the alleys have
+  // patrolling thugs, so give the scripted player i-frames or a lucky
+  // patrol route ends the test at the death screen instead of pause
+  await page.evaluate(() => {
+    window.DD.game.scene.getScene('play').player.inv = 9999;
+  });
 
   const box = await page.evaluate(() => {
     const r = document.querySelector('#frame canvas').getBoundingClientRect();
@@ -58,14 +74,19 @@ try {
   // (viewport here is 1280x800 vs. the 960x600 stage, so scale != 1 and a
   // stale ScaleManager/InputManager bounds cache would show up as an offset).
   // pointer.worldX/Y is only recomputed on an actual DOM pointer event, but
-  // the play camera's mouse look-ahead keeps lerping scroll for a few frames
-  // after that event — so settle first, then re-move to the same spot to
-  // refresh the pointer against the now-stable camera before comparing.
+  // the play camera's mouse look-ahead keeps lerping scroll after that event
+  // — so wait until the camera has actually stopped moving, then re-move to
+  // the same spot to refresh the pointer against the now-stable camera.
   const aimClientX = box.x + box.w * 0.73, aimClientY = box.y + box.h * 0.22;
   await page.mouse.move(aimClientX, aimClientY);
-  await sleep(500);
+  await page.waitForFunction(() => new Promise(res => {
+    const cam = window.DD.game.scene.getScene('play').cameras.main;
+    const x0 = cam.scrollX, y0 = cam.scrollY;
+    setTimeout(() => res(
+      Math.abs(cam.scrollX - x0) < 0.3 && Math.abs(cam.scrollY - y0) < 0.3), 150);
+  }), { polling: 200, timeout: 10000 });
   await page.mouse.move(aimClientX, aimClientY);
-  await sleep(20);
+  await sleep(30);
   const aim = await page.evaluate(({ clientX, clientY }) => {
     const rect = document.querySelector('#frame canvas').getBoundingClientRect();
     const S = window.DD.game.scene.getScene('play');

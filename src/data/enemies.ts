@@ -25,6 +25,17 @@ import type { EnemyDef } from '../types';
 
 export const ENEMY_TYPES: Record<string, EnemyDef> = {
 
+  /** Unarmed street muscle (the rival Kolibri crew). Drops nothing when
+   *  killed, so no-kill runs stay clean of temptation; their strike still
+   *  ends you — parry it or don't be there. Narrow eyes, slow to react:
+   *  built to be snuck past. */
+  thug: {
+    char: 't', name: 'THUG', behavior: 'melee', weapon: 'fists',
+    speed: 190, patrolSpeed: 48, sight: 340, hp: 1, r: 11, windup: 0.5, score: 50,
+    fov: 2.1, react: 0.45,
+    pal: { jacket: '#2fd6a8', jdark: '#177a5e', hair: '#161a1f', skin: '#c9a27b', pants: '#1a2a26' },
+  },
+
   /** Slow bruiser with a bat — the bread-and-butter threat. */
   goon: {
     char: 'g', name: 'GOON', behavior: 'melee', weapon: 'bat',

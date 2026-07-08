@@ -176,6 +176,54 @@ body {
 #btn-begin { align-self: flex-start; margin-top: 8px; }
 #ov-briefing .hint { align-self: flex-start; }
 
+/* --- dialogue (visual-novel scenes) --- */
+.dialog-bg {
+  background: linear-gradient(180deg, rgba(8,1,12,.88), rgba(22,3,26,.94) 60%, rgba(8,1,12,.98));
+  justify-content: flex-end;
+  cursor: pointer;
+}
+.dlg-stage { position: absolute; inset: 0 0 148px 0; pointer-events: none; }
+.dlg-char {
+  position: absolute; bottom: -8px;
+  height: 372px;
+  image-rendering: pixelated;
+  opacity: 0;
+  transition: opacity .25s, transform .25s, filter .18s;
+}
+.dlg-char.left  { left: 96px;  transform: translateY(14px); }
+.dlg-char.right { right: 96px; transform: translateY(14px) scaleX(-1); }
+.dlg-char.left.shown  { opacity: 1; transform: none; }
+.dlg-char.right.shown { opacity: 1; transform: scaleX(-1); }
+.dlg-char.shown:not(.active) { filter: brightness(.42) saturate(.55); }
+.dlg-char.active { filter: drop-shadow(0 0 16px rgba(255,255,255,.22)); }
+
+.dlg-box {
+  position: relative; z-index: 2;
+  width: 76%; min-height: 120px;
+  margin-bottom: 8px;
+  background: rgba(10,2,16,.93);
+  border: 2px solid var(--pink);
+  padding: 20px 22px 26px;
+  text-align: left;
+  box-shadow: 0 0 26px rgba(0,0,0,.65);
+}
+.dlg-name {
+  position: absolute; top: -12px; left: 14px;
+  font-family: 'Press Start 2P', monospace;
+  font-size: 11px; letter-spacing: 1px;
+  background: var(--ink);
+  padding: 3px 10px;
+}
+.dlg-text { font-size: 17px; line-height: 1.75; color: #e9d8f5; min-height: 60px; }
+.dlg-text.inner { color: #b7a5c9; font-style: italic; }
+.dlg-next {
+  position: absolute; right: 14px; bottom: 8px;
+  color: var(--cyan); font-size: 12px;
+  opacity: 0;
+}
+.dlg-next.on { opacity: 1; animation: ddpulse 1s infinite; }
+#ov-dialog .hint { margin: 10px 0 14px; }
+
 /* --- controls table on menu --- */
 .controls-grid {
   margin-top: 30px;

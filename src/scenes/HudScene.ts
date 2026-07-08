@@ -17,6 +17,9 @@ import type { PlayScene } from './PlayScene';
 const PS2P = "'Press Start 2P', monospace";
 const TECH = "'Share Tech Mono', monospace";
 
+const HINT_KB = 'WASD move · CLICK attack · punch downs, stomp finishes · SHIFT dodge · R-CLICK/F parry (bullets need a weapon) · E pick up/throw · ESC pause';
+const HINT_PAD = 'LS move · RS aim · RT attack · punch downs, stomp finishes · A/R3 dodge · LT parry (bullets need a weapon) · X/RB pick up/throw · START pause';
+
 export class HudScene extends Phaser.Scene {
   private weaponText!: Phaser.GameObjects.Text;
   private ammoText!: Phaser.GameObjects.Text;
@@ -48,7 +51,7 @@ export class HudScene extends Phaser.Scene {
     this.comboText = t(VIEW_W / 2, 40, 18, '#ff2d95').setOrigin(0.5);
     this.clearText = t(VIEW_W / 2, 84, 11, '#00e5ff').setOrigin(0.5).setText('FLOOR CLEAR — GET TO THE EXIT');
     this.hintText = t(VIEW_W / 2, VIEW_H - 20, 10, 'rgba(231,200,255,.35)', TECH).setOrigin(0.5)
-      .setText('WASD move · CLICK attack · punch downs, stomp finishes · SHIFT dodge · R-CLICK/F parry (bullets need a weapon) · E pick up/throw · ESC pause');
+      .setText(HINT_KB);
   }
 
   update(): void {
@@ -62,7 +65,9 @@ export class HudScene extends Phaser.Scene {
 
     const p = play.player;
     const L = LEVELS[play.levelIndex];
+    const B = L.boards[play.boardIndex];
     const wdef = WEAPONS[p.weapon];
+    this.hintText.setText(play.padActive ? HINT_PAD : HINT_KB);
 
     this.weaponText.setText(wdef.name);
     if (wdef.kind === 'gun') {
@@ -82,7 +87,8 @@ export class HudScene extends Phaser.Scene {
     this.bars.fillStyle(0x00e5ff, 1);
     this.bars.fillRect(70, 80, 80 * Phaser.Math.Clamp(1 - p.parryCd / PLAYER.parryCd, 0, 1), 6);
 
-    this.floorText.setColor(L.accent).setText('FLOOR ' + (play.levelIndex + 1) + '/' + LEVELS.length);
+    this.floorText.setColor(B.accent)
+      .setText(B.name + '  ' + (play.boardIndex + 1) + '/' + L.boards.length);
     let alive = 0;
     for (const e of play.enemies) if (e.alive) alive++;
     this.targetsText.setText('TARGETS ' + alive);
@@ -94,6 +100,11 @@ export class HudScene extends Phaser.Scene {
     } else {
       this.comboText.setVisible(false);
     }
-    this.clearText.setVisible(play.cleared).setColor(L.accent2);
+    // 'reach' boards show their goal the whole time; 'clear' boards show
+    // the exit call-out once everyone is down
+    this.clearText.setVisible(play.cleared).setColor(B.accent2)
+      .setText(B.objective === 'reach'
+        ? (B.goal ?? 'REACH THE EXIT')
+        : 'BOARD CLEAR — GET TO THE EXIT');
   }
 }

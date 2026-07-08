@@ -9,7 +9,11 @@
  * parry -> stagger -> execution bonus, punch knockdown -> head stomp,
  * directional vision (sneaking up from behind) + reaction delay, armored
  * heavies, thrown-weapon stagger, door kick stagger + door open/solid
- * rules, floor clear -> exit -> next floor, and the win flow.
+ * rules, and the level/board campaign flow: 'reach' boards (open exit +
+ * ghost bonus), board -> interlude dialogue -> next board, level clear
+ * screen, intro dialogue -> briefing, and the ending scene -> win.
+ *
+ * Combat tests run on LV.02 board 0 (THE WAREHOUSE) via begin(1, 0).
  */
 import puppeteer from 'puppeteer-core';
 
@@ -35,12 +39,14 @@ try {
   await page.goto(BASE, { waitUntil: 'networkidle0' });
   await page.waitForFunction('!!window.DD');
 
-  const begin = async (levelIndex = 0) => {
-    await page.evaluate((li) => {
+  // jump straight into a board (skips any dialogue a previous test left up)
+  const begin = async (levelIndex = 1, boardIndex = 0) => {
+    await page.evaluate(({ li, bi }) => {
       const { flow } = window.DD;
-      flow.levelIndex = li; flow.score = 0;
-      flow.beginLevel();
-    }, levelIndex);
+      flow.skipStory();
+      flow.levelIndex = li; flow.boardIndex = bi; flow.score = 0;
+      flow.beginBoard();
+    }, { li: levelIndex, bi: boardIndex });
     await sleep(500);
   };
   const scene = fn => page.evaluate(`(() => {
@@ -239,6 +245,52 @@ try {
   }`);
   check('throw damages + staggers heavy', r.hp === 1 && r.stunned && r.alive, 'hp=' + r.hp);
 
+  // --- 7b. persistent magazines: drops and throws keep their count ---
+  await begin();
+  r = await scene(`(S) => {
+    const p = S.player;
+    // a gunner with 5 rounds left drops a 5-round pistol
+    S.spawnEnemy('gunner', p.x + 60, p.y);
+    const e = S.enemies[S.enemies.length - 1];
+    e.ammo = 5;
+    S.killEnemy(e, 10, 0, false);
+    const pk = S.pickups[S.pickups.length - 1];
+    const dropAmmo = pk.st.ammo;
+    p.x = pk.st.x; p.y = pk.st.y; p.weapon = 'fists'; p.ammo = 0;
+    S.tryPickup();
+    const picked = { w: p.weapon, ammo: p.ammo };
+    // throwing it keeps the count too
+    p.ammo = 3; p.ang = 0;
+    S.throwWeapon();
+    for (let i = 0; i < 60 && S.throwables.length; i++) S.updateThrowables(1/60);
+    const landed = S.pickups[S.pickups.length - 1];
+    return { dropAmmo, picked, thrownAmmo: landed.st.ammo, thrownW: landed.st.w };
+  }`);
+  check('dropped gun keeps its ammo count',
+    r.dropAmmo === 5 && r.picked.w === 'pistol' && r.picked.ammo === 5,
+    `drop=${r.dropAmmo}, picked=${r.picked.ammo}`);
+  check('thrown gun keeps its ammo count',
+    r.thrownW === 'pistol' && r.thrownAmmo === 3, 'ammo=' + r.thrownAmmo);
+
+  // --- 7c. melee hitboxes match the animations: stab narrow, sweep wide ---
+  await begin();
+  r = await scene(`(S) => {
+    const p = S.player;
+    p.weapon = 'knife'; p.ang = 0; p.atkT = 0; p.chainT = 0;
+    S.spawnEnemy('goon', p.x + 42, p.y);              // dead ahead
+    const ahead = S.enemies[S.enemies.length - 1];
+    S.spawnEnemy('goon', p.x + 29, p.y + 29);         // ~45° off-axis, in range
+    const offAxis = S.enemies[S.enemies.length - 1];
+    S.meleeAttack();
+    const stab = { aheadDead: !ahead.alive, sideAlive: offAxis.alive };
+    // same off-axis target dies to the wide two-handed bat sweep
+    p.weapon = 'bat'; p.atkT = 0; p.chainT = 0;
+    S.meleeAttack();
+    return { ...stab, sweptDead: !offAxis.alive };
+  }`);
+  check('knife stab: narrow cone hits ahead only', r.aheadDead && r.sideAlive);
+  check('bat sweep: wide arc catches off-axis', r.sweptDead);
+
   // --- 8. doors: closed = solid + sight-blocking; kick staggers ---
   await begin();
   r = await scene(`(S) => {
@@ -255,38 +307,70 @@ try {
   check('kick opens door', r.open && !r.openSolid);
   check('kick staggers enemy behind door', r.stunned);
 
-  // --- 9. clear floor -> exit -> clear overlay -> next floor ---
+  // --- 9. every board parses and the exit is walkable from spawn ---
+  r = await page.evaluate(async () => {
+    const { LEVELS, flow, game } = window.DD;
+    const out = [];
+    for (let li = 0; li < LEVELS.length; li++) {
+      for (let bi = 0; bi < LEVELS[li].boards.length; bi++) {
+        flow.levelIndex = li; flow.boardIndex = bi; flow.score = 0;
+        flow.beginBoard();
+        await new Promise(res => setTimeout(res, 350));
+        const S = game.scene.getScene('play');
+        const T = 32;
+        const path = S.findPath(S.player.x, S.player.y,
+          S.lvl.exit.tx * T + T / 2, S.lvl.exit.ty * T + T / 2);
+        out.push({ id: li + '-' + bi, enemies: S.enemies.length, reachable: !!path });
+      }
+    }
+    return out;
+  });
+  check('all boards parse + exit reachable', r.every(x => x.reachable && x.enemies > 0),
+    r.map(x => x.id + (x.reachable ? ' ok' : ' BLOCKED')).join(', '));
+
+  // --- 10. 'reach' board: exit open from the start; ghost bonus ---
+  await begin(0, 0);
   r = await scene(`(S) => {
-    for (const e of S.enemies) if (e.alive) S.killEnemy(e, 10, 0, false);
-    S.update(0, 16);
-    const cleared = S.cleared;
+    const openAtStart = S.cleared && S.enemies.some(e => e.alive);
+    const before = S.score;
     const T = 32;
     S.player.x = S.lvl.exit.tx * T + T/2;
     S.player.y = S.lvl.exit.ty * T + T/2;
     S.update(0, 16);
-    return { cleared, over: S.over };
+    return { openAtStart, over: S.over, gain: S.score - before };
   }`);
-  check('all dead -> floor cleared', r.cleared);
+  check('reach board: exit open with enemies alive', r.openAtStart && r.over);
+  check('ghost bonus for zero kills', r.gain === 500, 'gain=' + r.gain);
+
+  // --- 11. finishing a level -> LEVEL CLEARED -> intro dialogue -> briefing ---
+  await begin(0, 1);
+  await scene(`(S) => {
+    const T = 32;
+    S.player.x = S.lvl.exit.tx * T + T/2;
+    S.player.y = S.lvl.exit.ty * T + T/2;
+    S.update(0, 16);
+  }`);
   await sleep(400);
   r = await page.evaluate(() => ({
     mode: window.DD.flow.mode,
     overlay: document.querySelector('#ov-clear').classList.contains('on'),
   }));
-  check('exit -> clear screen', r.mode === 'clear' && r.overlay, 'mode=' + r.mode);
+  check('last board of level -> clear screen', r.mode === 'clear' && r.overlay, 'mode=' + r.mode);
 
-  r = await page.evaluate(async () => {
-    window.DD.flow.nextLevel();
-    const briefing = window.DD.flow.mode === 'briefing';
-    const name = document.getElementById('brief-chapter').textContent;
-    window.DD.flow.beginLevel();
-    await new Promise(res => setTimeout(res, 500));
-    const S = window.DD.game.scene.getScene('play');
-    return { briefing, name, level: window.DD.flow.levelIndex, enemies: S.enemies.length };
+  r = await page.evaluate(() => {
+    window.DD.flow.nextLevel();               // -> LV.02 intro dialogue
+    const dlg = window.DD.flow.mode;
+    window.DD.flow.skipStory();               // -> briefing
+    return {
+      dlg,
+      briefing: window.DD.flow.mode === 'briefing',
+      name: document.getElementById('brief-chapter').textContent,
+    };
   });
-  check('next floor briefing + start', r.briefing && r.level === 1 && r.enemies > 0, `${r.name}, enemies=${r.enemies}`);
+  check('next level -> intro dialogue -> briefing', r.dlg === 'dialog' && r.briefing, r.name);
 
-  // --- 10. final floor win flow ---
-  await begin(2);
+  // --- 12. board exit -> interlude dialogue (once) -> next board ---
+  await begin(1, 0);
   await scene(`(S) => {
     for (const e of S.enemies) if (e.alive) S.killEnemy(e, 10, 0, false);
     S.update(0, 16);
@@ -296,12 +380,40 @@ try {
     S.update(0, 16);
   }`);
   await sleep(400);
-  r = await page.evaluate(() => ({
-    mode: window.DD.flow.mode,
-    overlay: document.querySelector('#ov-win').classList.contains('on'),
-    best: window.DD.flow.best,
-  }));
-  check('last floor -> win screen', r.mode === 'win' && r.overlay, 'best=' + r.best);
+  r = await page.evaluate(() => window.DD.flow.mode);
+  check('board clear -> interlude dialogue', r === 'dialog', 'mode=' + r);
+  r = await page.evaluate(async () => {
+    window.DD.flow.skipStory();               // -> next board starts
+    await new Promise(res => setTimeout(res, 450));
+    const S = window.DD.game.scene.getScene('play');
+    return { mode: window.DD.flow.mode, board: window.DD.flow.boardIndex, enemies: S.enemies.length };
+  });
+  check('interlude -> next board', r.mode === 'play' && r.board === 1 && r.enemies > 0,
+    `board=${r.board}, enemies=${r.enemies}`);
+
+  // --- 13. final board -> ending scene -> win screen ---
+  await begin(1, 2);
+  await scene(`(S) => {
+    for (const e of S.enemies) if (e.alive) S.killEnemy(e, 10, 0, false);
+    S.update(0, 16);
+    const T = 32;
+    S.player.x = S.lvl.exit.tx * T + T/2;
+    S.player.y = S.lvl.exit.ty * T + T/2;
+    S.update(0, 16);
+  }`);
+  await sleep(400);
+  r = await page.evaluate(() => {
+    const dlg = window.DD.flow.mode;
+    window.DD.flow.skipStory();
+    return {
+      dlg,
+      mode: window.DD.flow.mode,
+      overlay: document.querySelector('#ov-win').classList.contains('on'),
+      best: window.DD.flow.best,
+    };
+  });
+  check('last board -> ending scene -> win screen',
+    r.dlg === 'dialog' && r.mode === 'win' && r.overlay, 'best=' + r.best);
 
   if (errors.length) { console.log('PAGE ERRORS:\n' + errors.join('\n')); }
   const failed = results.filter(x => !x).length;

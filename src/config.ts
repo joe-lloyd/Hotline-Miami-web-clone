@@ -43,6 +43,14 @@ export const CAM = {
   lookMax: 95,       // max look-ahead distance in world px
 };
 
+/** Gamepad (standard twin-stick mapping: left stick moves, right aims). */
+export const PAD = {
+  deadzone: 0.22,     // left-stick deadzone (move)
+  aimDeadzone: 0.3,   // right-stick deadzone (aim)
+  trigger: 0.35,      // analog trigger / button press threshold
+  look: 0.8,          // camera look-ahead at full right-stick deflection, as a fraction of CAM.lookMax
+};
+
 export const PLAYER = {
   r: 10,
   speed: 205,
@@ -61,6 +69,8 @@ export const PLAYER_PAL: CharPalette = {
   jacket: '#ff2d95', jdark: '#a8175f', hair: '#20202b', skin: '#ffcfa8', pants: '#2a1030',
   fem: true, // reads as a woman from top-down: shoulders, black pixie cut, bust silhouette
 };
+
+export const GHOST_BONUS = 500;     // 'reach' board bonus for exiting with zero kills
 
 export const COMBO_TIME = 3.2;      // seconds before a kill combo resets
 export const PARRY_SCORE = 50;      // points per deflect / parried strike

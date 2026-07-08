@@ -24,24 +24,28 @@
  */
 import Phaser from 'phaser';
 import {
-  TILE, ZOOM, CAM, PLAYER, PLAYER_PAL, COMBO_TIME, PARRY_SCORE, EXECUTE_BONUS,
+  TILE, ZOOM, CAM, PAD, PLAYER, PLAYER_PAL, COMBO_TIME, PARRY_SCORE, EXECUTE_BONUS,
   GUNSHOT_NOISE, KICK_NOISE, STAGGER_TIME, KICK_RADIUS, KICK_SCORE,
   COLLIDE, WALL_INSET, ENEMY_FOV, CLOSE_SENSE, SEARCH_TIME,
-  DOWN_TIME, STOMP_RANGE, KILL_FLASH,
+  DOWN_TIME, STOMP_RANGE, KILL_FLASH, GHOST_BONUS,
 } from '../config';
 import { WEAPONS } from '../data/weapons';
 import { ENEMY_TYPES } from '../data/enemies';
 import { LEVELS } from '../data/levels';
 import { parseLevel, type ParsedLevel } from '../systems/level';
+import { padmap } from '../padmap';
 import { CharacterRig } from '../actors/CharacterRig';
 import { Door } from '../actors/Door';
 import { audio } from '../audio';
 import { hexNum, makeGlowTexture } from '../textures';
 import type {
-  Body, BulletState, EnemyState, LevelDef, PickupState, PlayerState, ThrowableState,
+  Body, BoardDef, BulletState, EnemyState, PickupState, PlayerState, ThrowableState,
 } from '../types';
 
 interface PickupActor { st: PickupState; spr: Phaser.GameObjects.Image; glow: Phaser.GameObjects.Image }
+/** Environment hook (keys, computers, switches …): nearest one in range
+ *  fires on the INTERACT button. Content adds these via addInteractable. */
+export interface Interactable { x: number; y: number; r: number; use: () => void }
 interface ThrowActor { st: ThrowableState; spr: Phaser.GameObjects.Image }
 interface Particle { x: number; y: number; vx: number; vy: number; life: number; c: number; r: number }
 interface Flash { x: number; y: number; t: number; ttl: number }
@@ -54,7 +58,8 @@ const GLOW_COLORS: Record<string, string> = {
 export class PlayScene extends Phaser.Scene {
   // --- content ---
   levelIndex = 0;
-  L!: LevelDef;
+  boardIndex = 0;
+  B!: BoardDef;
   lvl!: ParsedLevel;
 
   // --- sim state (public: the test suite reaches in) ---
@@ -92,22 +97,33 @@ export class PlayScene extends Phaser.Scene {
   // --- input ---
   private keysObj!: Record<'W' | 'A' | 'S' | 'D', Phaser.Input.Keyboard.Key>;
   private mouseDown = false;
+  private padFire = false;   // pad attack held — autofire for guns
+  private padAim = false;    // right stick owns the aim until the mouse moves again
+  private padLook = 0;       // right-stick deflection, drives the camera look-ahead
+  private padSeeded = false; // first poll swallows buttons already held on scene start
+  private padPrev = { dash: false, pick: false, atk: false, parry: false, inter: false };
+  private lastPtrX = 0;
+  private lastPtrY = 0;
+  padActive = false;         // last input came from a gamepad (HUD swaps its hints)
   attackTap = false;
   dashTap = false;
   parryTap = false;
   pickTap = false;
+  interactTap = false;
+  interactables: Interactable[] = [];
 
   constructor() { super('play'); }
 
-  init(data: { levelIndex?: number; score?: number }): void {
+  init(data: { levelIndex?: number; boardIndex?: number; score?: number }): void {
     this.levelIndex = data.levelIndex ?? 0;
+    this.boardIndex = data.boardIndex ?? 0;
     this.score = data.score ?? 0;
   }
 
   // ================= creation =================
   create(): void {
-    this.L = LEVELS[this.levelIndex];
-    this.lvl = parseLevel(this.L);
+    this.B = LEVELS[this.levelIndex].boards[this.boardIndex];
+    this.lvl = parseLevel(this.B);
     const lvl = this.lvl;
 
     // reset per-run state (scene instances are reused by restarts)
@@ -118,8 +134,11 @@ export class PlayScene extends Phaser.Scene {
     this.cleared = false; this.over = false;
     this.ts = 1; this.slowT = 0; this.killFlash = 0; this.combatT = 0;
     this.mouseDown = false;
-    this.attackTap = this.dashTap = this.parryTap = this.pickTap = false;
+    this.attackTap = this.dashTap = this.parryTap = this.pickTap = this.interactTap = false;
+    this.padFire = false; this.padAim = false; this.padLook = 0; this.padSeeded = false;
+    this.interactables = [];
 
+    this.buildBackdrop();
     this.buildWorldImage();
 
     // red kill-pulse: sits on the floor, under blood decals and actors
@@ -131,7 +150,7 @@ export class PlayScene extends Phaser.Scene {
 
     // doors
     for (const d of lvl.doors) {
-      const door = new Door(this, d, this.L.accent2);
+      const door = new Door(this, d, this.B.accent2);
       door.setDepth(5);
       this.doors.push(door);
       this.doorMap.set(d.tx + ',' + d.ty, door);
@@ -158,21 +177,67 @@ export class PlayScene extends Phaser.Scene {
     // exit label
     const T = TILE;
     this.exitText = this.add.text(lvl.exit.tx * T + T / 2, lvl.exit.ty * T + T / 2 - 24, 'EXIT', {
-      fontFamily: "'Press Start 2P', monospace", fontSize: '8px', color: this.L.accent2,
+      fontFamily: "'Press Start 2P', monospace", fontSize: '8px', color: this.B.accent2,
     }).setOrigin(0.5).setDepth(7).setVisible(false);
 
-    // camera
+    // 'reach' boards: the way out is open from the start — clearing the
+    // board is optional (and leaving zero bodies pays a ghost bonus)
+    if (this.B.objective === 'reach') {
+      this.cleared = true;
+      this.exitText.setVisible(true);
+    }
+
+    // camera — deliberately UNBOUNDED: near the level edge the view
+    // drifts out over the neon void instead of clamping
     const cam = this.cameras.main;
-    cam.setBounds(0, 0, lvl.worldW, lvl.worldH);
     cam.setZoom(ZOOM);
     cam.startFollow(this.playerRig.root, false, CAM.lerp, CAM.lerp);
 
     this.bindInput();
   }
 
+  /** The neon void: a gradient sheet far past the level bounds, visible
+   *  wherever the unbounded camera (or a shaped map's ' ' cells) shows
+   *  past the walls. Canvas-drawn — gradient fills are renderer-safe. */
+  private buildBackdrop(): void {
+    const key = 'void-' + this.levelIndex + '-' + this.boardIndex;
+    if (!this.textures.exists(key)) {
+      const ink = { r: 8, g: 1, b: 12 };
+      const mix = (hex: string, k: number) => {
+        const n = parseInt(hex.slice(1), 16);
+        const r = Math.round(ink.r + ((n >> 16) - ink.r) * k);
+        const g2 = Math.round(ink.g + (((n >> 8) & 255) - ink.g) * k);
+        const b = Math.round(ink.b + ((n & 255) - ink.b) * k);
+        return `rgb(${r},${g2},${b})`;
+      };
+      const cv = this.textures.createCanvas(key, 512, 512)!;
+      const ctx = cv.context;
+      const grd = ctx.createLinearGradient(0, 0, 512, 512);
+      grd.addColorStop(0, mix(this.B.accent, 0.05));
+      grd.addColorStop(0.38, mix(this.B.accent, 0.2));
+      grd.addColorStop(0.62, mix(this.B.accent2, 0.16));
+      grd.addColorStop(1, mix(this.B.accent2, 0.04));
+      ctx.fillStyle = grd;
+      ctx.fillRect(0, 0, 512, 512);
+      // faint diagonal striping so the void reads as "somewhere", not flat
+      ctx.strokeStyle = mix(this.B.accent, 0.32);
+      ctx.globalAlpha = 0.10;
+      ctx.lineWidth = 2;
+      for (let i = -512; i < 512; i += 26) {
+        ctx.beginPath(); ctx.moveTo(i, 0); ctx.lineTo(i + 512, 512); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      cv.refresh();
+    }
+    const M = 900; // farther than the free camera can ever see
+    this.add.image(-M, -M, key).setOrigin(0, 0)
+      .setDisplaySize(this.lvl.worldW + 2 * M, this.lvl.worldH + 2 * M)
+      .setDepth(-1);
+  }
+
   /** Render the static world (floor, walls, neon trim) into one texture. */
   private buildWorldImage(): void {
-    const key = 'world-' + this.levelIndex;
+    const key = 'world-' + this.levelIndex + '-' + this.boardIndex;
     if (!this.textures.exists(key)) {
       const lvl = this.lvl, T = TILE, I = WALL_INSET;
       const open = (x: number, y: number) =>
@@ -184,20 +249,20 @@ export class PlayScene extends Phaser.Scene {
           // and doorways wider (visual only — collision stays full-tile)
           const t = open(x, y - 1) ? I : 0, b = open(x, y + 1) ? I : 0;
           const l = open(x - 1, y) ? I : 0, r = open(x + 1, y) ? I : 0;
-          g.fillStyle(hexNum(((x + y) & 1) ? this.L.floorA : this.L.floorB), 1);
+          g.fillStyle(hexNum(((x + y) & 1) ? this.B.floorA : this.B.floorB), 1);
           g.fillRect(x * T, y * T, T, T);
           g.fillStyle(0x2a0f3d, 1);
           g.fillRect(x * T + l, y * T + t, T - l - r, T - t - b);
           g.fillStyle(0x1c0a2a, 1);
           g.fillRect(x * T + l, y * T + T - b - 5, T - l - r, 5);
-        } else {
-          g.fillStyle(hexNum(((x + y) & 1) ? this.L.floorA : this.L.floorB), 1);
+        } else if (lvl.grid[y][x] === 0) {
+          g.fillStyle(hexNum(((x + y) & 1) ? this.B.floorA : this.B.floorB), 1);
           g.fillRect(x * T, y * T, T, T);
-        }
+        } // void (2): draw nothing — the backdrop gradient shows through
       }
       // neon trim: soft pass + crisp pass
       for (const [w, a] of [[4.5, 0.10], [1.4, 0.55]] as const) {
-        g.lineStyle(w, hexNum(this.L.accent), a);
+        g.lineStyle(w, hexNum(this.B.accent), a);
         g.beginPath();
         for (const e of lvl.edges) { g.moveTo(e[0], e[1]); g.lineTo(e[2], e[3]); }
         g.strokePath();
@@ -213,9 +278,9 @@ export class PlayScene extends Phaser.Scene {
     this.keysObj = kb.addKeys('W,A,S,D') as PlayScene['keysObj'];
     kb.on('keydown-SHIFT', () => { this.dashTap = true; });
     kb.on('keydown-SPACE', () => { this.dashTap = true; });
-    kb.on('keydown-F', () => { this.parryTap = true; });
     kb.on('keydown-Q', () => { this.parryTap = true; });
     kb.on('keydown-E', () => { this.pickTap = true; });
+    kb.on('keydown-F', () => { this.interactTap = true; });
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => {
       if (p.button === 0) { this.mouseDown = true; this.attackTap = true; }
       if (p.button === 2) this.parryTap = true;
@@ -223,6 +288,45 @@ export class PlayScene extends Phaser.Scene {
     this.input.on('pointerup', (p: Phaser.Input.Pointer) => {
       if (p.button === 0) this.mouseDown = false;
     });
+  }
+
+  /** Twin-stick gamepad: left stick moves, right stick aims, and the
+   *  buttons feed the same tap flags the keyboard/mouse handlers set.
+   *  Standard mapping — A/R3 dodge, X/RB pick/throw, RT attack, LT/LB parry
+   *  (START is handled by main.ts so it works while paused too).
+   *  Returns the left-stick move vector. */
+  private pollPad(): { mx: number; my: number } {
+    const pad = this.input.gamepad?.gamepads.find(g => g && g.connected);
+    if (!pad) { this.padFire = false; this.padLook = 0; return { mx: 0, my: 0 }; }
+
+    let mx = 0, my = 0;
+    const ls = pad.leftStick;
+    if (Math.hypot(ls.x, ls.y) > PAD.deadzone) { mx = ls.x; my = ls.y; }
+
+    const rs = pad.rightStick;
+    const rMag = Math.hypot(rs.x, rs.y);
+    this.padLook = rMag > PAD.aimDeadzone ? Math.min(1, rMag) : 0;
+    if (rMag > PAD.aimDeadzone) { this.player.ang = Math.atan2(rs.y, rs.x); this.padAim = true; }
+
+    const btn = (i: number) => (pad.buttons[i]?.value ?? 0) > PAD.trigger;
+    const cur = {
+      dash: btn(0) || btn(10),    // A / cross, or clicking the aim stick (R3)
+      pick: btn(2) || btn(5),     // X / square, or RB
+      atk: btn(7),                // RT
+      parry: btn(6) || btn(4),    // LT / LB
+    };
+    // buttons still held from before the scene started (e.g. the A that
+    // confirmed RETRY) must not fire on frame one
+    if (!this.padSeeded) { this.padSeeded = true; this.padPrev = cur; }
+    if (cur.dash && !this.padPrev.dash) this.dashTap = true;
+    if (cur.pick && !this.padPrev.pick) this.pickTap = true;
+    if (cur.atk && !this.padPrev.atk) this.attackTap = true;
+    if (cur.parry && !this.padPrev.parry) this.parryTap = true;
+    this.padFire = cur.atk;
+    if (mx || my || rMag > PAD.aimDeadzone || cur.dash || cur.pick || cur.atk || cur.parry)
+      this.padActive = true;
+    this.padPrev = cur;
+    return { mx, my };
   }
 
   private spawnEnemy(type: string, x: number, y: number): void {
@@ -244,12 +348,16 @@ export class PlayScene extends Phaser.Scene {
     this.rigs.set(e, rig);
   }
 
-  spawnPickup(w: string, x: number, y: number): void {
+  /** ammo: dropped/thrown guns keep their count; map spawns get a full mag */
+  spawnPickup(w: string, x: number, y: number, ammo?: number): void {
     const glowKey = makeGlowTexture(this, GLOW_COLORS[w] ?? '#ffffff');
     const glow = this.add.image(x, y, glowKey).setDepth(4).setAlpha(0.5).setScale(0.35);
     const sprKey = this.textures.exists('wpn-' + w) ? 'wpn-' + w : 'wpn-pistol';
     const spr = this.add.image(x, y, sprKey).setDepth(4).setScale(0.25);
-    this.pickups.push({ st: { x, y, w, spin: Math.random() * 6 }, spr, glow });
+    this.pickups.push({
+      st: { x, y, w, spin: Math.random() * 6, ammo: ammo ?? WEAPONS[w].ammo ?? 0 },
+      spr, glow,
+    });
   }
 
   // ================= collision =================
@@ -258,7 +366,7 @@ export class PlayScene extends Phaser.Scene {
     const T = TILE, lvl = this.lvl;
     const tx = Math.floor(px / T), ty = Math.floor(py / T);
     if (tx < 0 || ty < 0 || tx >= lvl.W || ty >= lvl.H) return true;
-    if (lvl.grid[ty][tx] === 1) return true;
+    if (lvl.grid[ty][tx] !== 0) return true; // walls AND void (shaped maps)
     const door = this.doorMap.get(tx + ',' + ty);
     return !!door && !door.state.open;
   }
@@ -325,7 +433,7 @@ export class PlayScene extends Phaser.Scene {
     const sx0 = Math.floor(sx / T), sy0 = Math.floor(sy / T);
     const gx0 = Math.floor(gx / T), gy0 = Math.floor(gy / T);
     const inb = (x: number, y: number) => x >= 0 && y >= 0 && x < W && y < H;
-    if (!inb(sx0, sy0) || !inb(gx0, gy0) || lvl.grid[gy0][gx0] === 1) return null;
+    if (!inb(sx0, sy0) || !inb(gx0, gy0) || lvl.grid[gy0][gx0] !== 0) return null;
     const start = sy0 * W + sx0, goal = gy0 * W + gx0;
     if (start === goal) return [];
     const prev = new Int32Array(W * H).fill(-1);
@@ -426,6 +534,9 @@ export class PlayScene extends Phaser.Scene {
       const T = TILE;
       const ex = this.lvl.exit.tx * T + T / 2, ey = this.lvl.exit.ty * T + T / 2;
       if (Math.hypot(p.x - ex, p.y - ey) < 26) {
+        // ghost bonus: a 'reach' board finished without a single corpse
+        if (this.B.objective === 'reach' && !this.enemies.some(e => !e.alive))
+          this.score += GHOST_BONUS;
         this.over = true;
         this.game.events.emit('dd-exit', this.score);
       }
@@ -435,15 +546,24 @@ export class PlayScene extends Phaser.Scene {
   // ================= player =================
   private updatePlayer(dt: number): void {
     const p = this.player;
+    const pd = this.pollPad();
     const ptr = this.input.activePointer;
-    p.ang = Math.atan2(ptr.worldY - p.y, ptr.worldX - p.x);
+    // moving the mouse hands aim (and the HUD hints) back to it
+    if (ptr.x !== this.lastPtrX || ptr.y !== this.lastPtrY) {
+      this.lastPtrX = ptr.x; this.lastPtrY = ptr.y;
+      this.padAim = false; this.padActive = false;
+    }
+    if (!this.padAim) p.ang = Math.atan2(ptr.worldY - p.y, ptr.worldX - p.x);
 
-    let mx = 0, my = 0;
+    let mx = pd.mx, my = pd.my;
     if (this.keysObj.W.isDown) my -= 1;
     if (this.keysObj.S.isDown) my += 1;
     if (this.keysObj.A.isDown) mx -= 1;
     if (this.keysObj.D.isDown) mx += 1;
-    const ml = Math.hypot(mx, my) || 1; mx /= ml; my /= ml;
+    if (mx !== pd.mx || my !== pd.my) this.padActive = false;
+    // clamp rather than normalize so a half-pushed stick walks slower
+    const ml = Math.hypot(mx, my);
+    if (ml > 1) { mx /= ml; my /= ml; }
 
     p.dashCd -= dt; p.inv -= dt; p.atkT -= dt; p.chainT -= dt;
     p.parryCd -= dt; p.parryT -= dt; p.parryFx -= dt;
@@ -472,6 +592,8 @@ export class PlayScene extends Phaser.Scene {
       if (p.parryCd <= 0) {
         p.parryT = PLAYER.parryWindow;
         p.parryCd = PLAYER.parryCd;
+        // the character IS the telegraph — per-grip deflect flourish
+        this.playerRig.playParry(PLAYER.parryWindow);
         this.enterCombat();
         audio.sfx('parrySwing');
       }
@@ -500,7 +622,7 @@ export class PlayScene extends Phaser.Scene {
 
     const wdef = WEAPONS[p.weapon];
     if (wdef.kind === 'gun') {
-      if (this.mouseDown && p.atkT <= 0) this.fireGun();
+      if ((this.mouseDown || this.padFire) && p.atkT <= 0) this.fireGun();
     } else if (this.attackTap && p.atkT <= 0) {
       this.meleeAttack();
     }
@@ -605,7 +727,7 @@ export class PlayScene extends Phaser.Scene {
         st.x = Math.max(16, Math.min(this.lvl.worldW - 16, st.x));
         st.y = Math.max(16, Math.min(this.lvl.worldH - 16, st.y));
         tw.spr.destroy();
-        this.spawnPickup(st.w, st.x, st.y);
+        this.spawnPickup(st.w, st.x, st.y, st.ammo);
         st.dead = true;
       } else {
         tw.spr.setPosition(st.x, st.y).setRotation(st.spin);
@@ -625,7 +747,7 @@ export class PlayScene extends Phaser.Scene {
     // swapping always THROWS the old weapon at whatever you're aiming at
     if (p.weapon !== 'fists') this.throwWeapon();
     p.weapon = best.st.w;
-    p.ammo = WEAPONS[best.st.w].ammo ?? 0;
+    p.ammo = best.st.ammo ?? 0;
     best.spr.destroy(); best.glow.destroy();
     this.pickups = this.pickups.filter(x => x !== best);
     this.playerRig.playPickup();
@@ -642,7 +764,7 @@ export class PlayScene extends Phaser.Scene {
     const st: ThrowableState = {
       x: p.x + Math.cos(p.ang) * 14, y: p.y + Math.sin(p.ang) * 14,
       vx: Math.cos(p.ang) * sp, vy: Math.sin(p.ang) * sp,
-      w: p.weapon, spin: 0, life: 1.2,
+      w: p.weapon, spin: 0, life: 1.2, ammo: p.ammo,
     };
     const spr = this.add.image(st.x, st.y, 'wpn-' + st.w).setDepth(6).setScale(0.25);
     this.throwables.push({ st, spr });
@@ -925,7 +1047,8 @@ export class PlayScene extends Phaser.Scene {
       const sp = 60 + Math.random() * 220;
       this.particles.push({ x: e.x, y: e.y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp, life: 0.5 + Math.random() * 0.4, c: 0xff164e, r: 1 + Math.random() * 2.5 });
     }
-    if (e.weapon && e.weapon !== 'fists') this.spawnPickup(e.weapon, e.x, e.y);
+    // the dropped gun holds exactly what its owner hadn't fired yet
+    if (e.weapon && e.weapon !== 'fists') this.spawnPickup(e.weapon, e.x, e.y, e.ammo);
 
     this.combo += 1;
     this.comboT = COMBO_TIME;
@@ -1027,11 +1150,17 @@ export class PlayScene extends Phaser.Scene {
       pk.glow.setPosition(pk.st.x, pk.st.y + bob).setAlpha(0.35 + 0.15 * Math.sin(this.time2 * 4 + pk.st.x));
     }
 
-    // camera look-ahead toward the mouse
-    const ptr = this.input.activePointer;
-    let lx = (ptr.worldX - p.x) * CAM.lookAhead, ly = (ptr.worldY - p.y) * CAM.lookAhead;
-    const ll = Math.hypot(lx, ly);
-    if (ll > CAM.lookMax) { lx = lx / ll * CAM.lookMax; ly = ly / ll * CAM.lookMax; }
+    // camera look-ahead toward the mouse (or along the aim stick)
+    let lx: number, ly: number;
+    if (this.padAim) {
+      const m = CAM.lookMax * PAD.look * this.padLook;
+      lx = Math.cos(p.ang) * m; ly = Math.sin(p.ang) * m;
+    } else {
+      const ptr = this.input.activePointer;
+      lx = (ptr.worldX - p.x) * CAM.lookAhead; ly = (ptr.worldY - p.y) * CAM.lookAhead;
+      const ll = Math.hypot(lx, ly);
+      if (ll > CAM.lookMax) { lx = lx / ll * CAM.lookMax; ly = ly / ll * CAM.lookMax; }
+    }
     this.cameras.main.setFollowOffset(-lx, -ly);
   }
 
@@ -1039,7 +1168,7 @@ export class PlayScene extends Phaser.Scene {
   private render(_raw: number): void {
     const g = this.fxG, p = this.player;
     g.clear();
-    const accent2 = hexNum(this.L.accent2);
+    const accent2 = hexNum(this.B.accent2);
 
     // exit pad
     const T = TILE;
@@ -1084,14 +1213,8 @@ export class PlayScene extends Phaser.Scene {
       }
     }
 
-    // parry window arc + success ring
-    if (p.alive && p.parryT > 0) {
-      const a = p.parryT / PLAYER.parryWindow;
-      g.lineStyle(3, 0x00e5ff, 0.35 + 0.55 * a);
-      g.beginPath();
-      g.arc(p.x, p.y, 21, p.ang - 1.15, p.ang + 1.15);
-      g.strokePath();
-    }
+    // parry SUCCESS ring (the active window itself is shown by the rig's
+    // deflect animation, not a HUD arc)
     if (p.parryFx > 0) {
       const t = p.parryFx / 0.3;
       g.lineStyle(2.5, 0xffffff, t);

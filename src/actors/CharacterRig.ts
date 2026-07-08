@@ -16,11 +16,21 @@
  * Because limbs are stretched between joints every frame, legs and arms
  * genuinely articulate rather than being baked into one sprite:
  *   - walking: feet stride sinusoidally, legs follow, free hands swing
- *   - actions: playSwing (melee sweep), playPickup (crouch + both hands
- *     reach down), playKick (foot thrust for door kicks), playThrow (arm
- *     whip), playRoll (full-body dodge spin)
- *   - states: windup raises the weapon arm (the parry telegraph), stun
- *     wobbles the torso, hitFlash blinks armored targets white
+ *   - hold stances are per WEAPONS[..].grip: 'unarmed' guard, 'melee1h'
+ *     blade point-forward ready to stab, 'melee2h' both hands on the
+ *     handle cocked over the shoulder, 'gun1h' shooting arm extended with
+ *     the off hand tucked, 'gun2h' shouldered two-handed grip
+ *   - actions: playSwing (stab for melee1h, wide two-handed sweep for
+ *     melee2h, punch arc unarmed), playParry (per-grip deflect flourish),
+ *     playPickup (crouch + both hands reach down), playKick (foot thrust
+ *     for door kicks), playThrow (arm whip), playRoll (dodge spin)
+ *   - states: windup pulls the weapon back (the parry telegraph — a
+ *     drawn-back blade for stabs, a raised bat for sweeps), stun wobbles
+ *     the torso, hitFlash blinks armored targets white
+ *
+ * The swing animation SHAPES match the hit geometry: WEAPONS range/arc
+ * are the hitbox PlayScene tests, so a stab reads narrow and a bat sweep
+ * reads wide because they are.
  *
  * All parts use pre-colored textures from textures.ts (never setTint —
  * that's WebGL-only and the game supports the Canvas renderer). The rig
@@ -48,7 +58,7 @@ export interface RigInput {
   relaxed?: boolean;
 }
 
-type ActionType = 'swing' | 'pickup' | 'kick' | 'throw' | 'roll';
+type ActionType = 'swing' | 'parry' | 'pickup' | 'kick' | 'throw' | 'roll';
 interface Action { type: ActionType; t: number; dur: number; ang?: number }
 
 const rot = (x: number, y: number, a: number): [number, number] =>
@@ -132,6 +142,7 @@ export class CharacterRig {
     this.action = { type, t: 0, dur, ang };
   }
   playSwing(dur = 0.18): void { this.play('swing', dur); }
+  playParry(dur = 0.22): void { this.play('parry', dur); }
   playPickup(): void { this.play('pickup', 0.28); }
   playThrow(): void { this.play('throw', 0.16); }
   playKick(worldAng: number): void { this.play('kick', 0.2, worldAng); }
@@ -187,12 +198,17 @@ export class CharacterRig {
     const crouch = act?.type === 'pickup' ? 1 - 0.14 * Math.sin(prog * Math.PI) : 1;
     this.torsoC.setScale(crouch);
 
-    // ----- arms + weapon -----
-    const isGun = WEAPONS[this.weapon]?.kind === 'gun';
+    // ----- arms + weapon: posed per grip class -----
+    const grip = WEAPONS[this.weapon]?.grip ?? 'unarmed';
+    const isMelee = grip === 'melee1h' || grip === 'melee2h';
+    // windup counts DOWN to the strike, so the pull-back releases as it lands
+    const windupK = (st.windup ?? 0) > 0
+      ? Math.min(1, (st.windup ?? 0) / (st.windupMax || 0.4)) : 0;
 
+    // arcing sweep angle (punches + two-handed sweeps)
     let armAng = 0;
-    if (act?.type === 'swing') armAng = -1.15 + prog * 2.3;
-    else if ((st.windup ?? 0) > 0) armAng = -1.05 * Math.min(1, (st.windup ?? 0) / (st.windupMax || 0.4));
+    if (act?.type === 'swing') armAng = grip === 'melee2h' ? -1.5 + prog * 3.0 : -1.15 + prog * 2.3;
+    else if (windupK > 0) armAng = (grip === 'melee2h' ? -1.35 : -1.05) * windupK;
 
     let hlx: number, hly: number, hrx: number, hry: number;
     let wx = 0, wy = 0, wrot = 0;
@@ -201,36 +217,79 @@ export class CharacterRig {
     // Any action (swing/kick/throw/...) counts as guard immediately.
     this.stance += ((st.relaxed && !act ? 0 : 1) - this.stance) * Math.min(1, dt * 9);
 
-    if (isGun) {
-      // two-handed grip, weapon centered forward
-      hlx = 10.5 * s; hly = -1.6 * s;
-      hrx = 11.5 * s; hry = 1.6 * s;
-      wx = 8.5 * s; wy = 0; wrot = 0;
-    } else if (this.weapon === 'fists') {
-      hlx = 7.5 * s; hly = -6.5 * s + swingArm;
-      hrx = 7.5 * s; hry = 6.5 * s - swingArm;
-      [hrx, hry] = rot(hrx, hry, armAng); // punches follow the swing
-      // relaxed arms hang at her sides and swing naturally with the walk
-      const k = 1 - this.stance;
-      if (k > 0.001) {
-        hlx += (-1.5 * s + swingArm * 1.5 - hlx) * k;
-        hly += (-7.8 * s - hly) * k;
-        hrx += (-1.5 * s - swingArm * 1.5 - hrx) * k;
-        hry += (7.8 * s - hry) * k;
+    switch (grip) {
+      case 'gun2h': {
+        // shouldered two-handed stance: lead hand out along the barrel,
+        // trigger hand back at the stock
+        hlx = 13 * s; hly = -0.6 * s;
+        hrx = 8.4 * s; hry = 2.0 * s;
+        wx = 9.6 * s; wy = 0.6 * s; wrot = 0;
+        break;
       }
-    } else {
-      // one-handed melee: right hand grips, weapon sweeps with armAng
-      [hrx, hry] = rot(9.5 * s, 4.5 * s, armAng);
-      [hlx, hly] = rot(7.5 * s, -6.5 * s + swingArm, armAng * 0.4);
-      wx = hrx; wy = hry; wrot = armAng;
+      case 'gun1h': {
+        // pistol: shooting arm extended, off hand tucked in guard
+        hrx = 11.8 * s; hry = 2.0 * s;
+        hlx = 5.2 * s; hly = -4.6 * s + swingArm * 0.6;
+        wx = 11 * s; wy = 1.7 * s; wrot = 0;
+        break;
+      }
+      case 'melee2h': {
+        // bat cocked back ready to rip, both hands together on the handle;
+        // the grip point itself arcs across the body during a sweep
+        const a = armAng - 0.85;                            // bat angle rel. aim
+        const [gx, gy] = rot(6.8 * s, 4.2 * s, armAng * 0.65);
+        hrx = gx; hry = gy;
+        hlx = gx + Math.cos(a) * 3.2 * s;
+        hly = gy + Math.sin(a) * 3.2 * s;
+        wx = gx; wy = gy; wrot = a;
+        break;
+      }
+      case 'melee1h': {
+        // knife point-forward at the ready; attacks THRUST straight in
+        // (narrow stab cone), enemies telegraph by drawing the blade back
+        const stab = act?.type === 'swing' ? Math.sin(prog * Math.PI) * 6.5 * s : 0;
+        hrx = 9.4 * s + stab - windupK * 4 * s; hry = 1.8 * s;
+        hlx = 6.4 * s; hly = -5.4 * s + swingArm;           // off hand guards
+        wx = hrx; wy = hry; wrot = 0;
+        break;
+      }
+      default: { // unarmed
+        hlx = 7.5 * s; hly = -6.5 * s + swingArm;
+        hrx = 7.5 * s; hry = 6.5 * s - swingArm;
+        [hrx, hry] = rot(hrx, hry, armAng); // punches follow the swing
+        // relaxed arms hang at her sides and swing naturally with the walk
+        const k = 1 - this.stance;
+        if (k > 0.001) {
+          hlx += (-1.5 * s + swingArm * 1.5 - hlx) * k;
+          hly += (-7.8 * s - hly) * k;
+          hrx += (-1.5 * s - swingArm * 1.5 - hrx) * k;
+          hry += (7.8 * s - hry) * k;
+        }
+      }
     }
 
-    if (act?.type === 'pickup') {
+    if (act?.type === 'parry') {
+      // deflect flourish — the guard snapping up across the body is the
+      // parry-window telegraph (there is no HUD arc anymore)
+      const k = Math.sin(prog * Math.PI);
+      if (grip === 'unarmed') {
+        // both fists snap into a cross-guard
+        hlx += (9.5 * s - hlx) * k; hly += (-2.4 * s - hly) * k;
+        hrx += (9.5 * s - hrx) * k; hry += (2.4 * s - hry) * k;
+      } else {
+        // weapon swats up across the front
+        hrx += (10 * s - hrx) * k; hry += (0.8 * s - hry) * k;
+        hlx += (7.5 * s - hlx) * k; hly += (-2.6 * s - hly) * k;
+        if (isMelee) { wx = hrx; wy = hry; }
+        else { wx += (9.5 * s - wx) * k; wy += (0.8 * s - wy) * k; }
+        wrot -= 1.15 * k;
+      }
+    } else if (act?.type === 'pickup') {
       // both hands reach down front-center
       const k = Math.sin(prog * Math.PI);
       hlx = hlx + (6.5 * s - hlx) * k; hly = hly + (-2 * s - hly) * k;
       hrx = hrx + (6.5 * s - hrx) * k; hry = hry + (2 * s - hry) * k;
-      if (!isGun && this.weapon !== 'fists') { wx = hrx; wy = hry; }
+      if (isMelee) { wx = hrx; wy = hry; }
     } else if (act?.type === 'throw') {
       const k = Math.sin(prog * Math.PI);
       hrx = hrx + (13.5 * s - hrx) * k; hry = hry + (0.5 * s - hry) * k;

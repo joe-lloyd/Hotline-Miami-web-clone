@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-DEAD DROP — a neon-noir top-down action game (Hotline Miami-inspired). One-hit-kill combat with melee/guns, a dodge roll, a parry mechanic (staggers melee attackers for an execution bonus; deflects bullets only while HOLDING a weapon — bare fists can't), throwable weapons (swapping pickups throws the old weapon), and kickable doors. Fists are nonlethal: a punch knocks an enemy down and they must be finished with a stomp before they get back up (parried/staggered targets still die to anything, fists included). Melee weapons have distinct first-swing (`cd`) and chained follow-up (`cd2`) speeds. Enemy vision is directional (`fov` + `react` reaction lag — sneaking up from behind works) and all enemy types investigate gunshot/kick noise. Kills pulse the whole floor red. Built with Phaser 3 + TypeScript + Vite; deployable to Netlify via `netlify.toml` (publishes `dist/`). No image or audio assets ship with the game — every sprite is drawn procedurally into textures at boot, and every sound is synthesized live with WebAudio.
+DEAD DROP — a neon-noir top-down action game (Hotline Miami-inspired). One-hit-kill combat with melee/guns, a dodge roll, a parry mechanic (staggers melee attackers for an execution bonus; deflects bullets only while HOLDING a weapon — bare fists can't; the parry window is telegraphed by the rig's deflect animation, not a HUD arc), throwable weapons (swapping pickups throws the old weapon), and kickable doors. Weapons have a `grip` class (unarmed / 1h stab / 2h sweep / 1h gun / 2h gun) that drives both the hold stance and the attack animation, and the melee `range`/`arc` values ARE the hitbox — knife stabs a narrow cone, bat sweeps a wide arc. Guns carry persistent magazines: a dropped or thrown gun keeps exactly the rounds its last owner left in it (map pickups spawn full). Fists are nonlethal: a punch knocks an enemy down and they must be finished with a stomp before they get back up (parried/staggered targets still die to anything, fists included). Melee weapons have distinct first-swing (`cd`) and chained follow-up (`cd2`) speeds. Enemy vision is directional (`fov` + `react` reaction lag — sneaking up from behind works) and all enemy types investigate gunshot/kick noise. Kills pulse the whole floor red. Full gamepad support (twin-stick; menus too). Built with Phaser 3 + TypeScript + Vite; deployable to Netlify via `netlify.toml` (publishes `dist/`). No image or audio assets ship with the game — every sprite is drawn procedurally into textures at boot, and every sound is synthesized live with WebAudio.
+
+The campaign is LEVELS containing BOARDS: a level is a named chapter with one briefing and a run of boards (playable maps) that chain seamlessly; finishing a level shows the clear screen. Boards have an objective: `'clear'` (default — kill everyone to unlock the exit) or `'reach'` (exit open from the start; sneak or fight through, and exiting with zero corpses pays `GHOST_BONUS`). Between-the-action story is told in visual-novel dialogue scenes (full-body procedural character cutouts + typewriter text): levels have `intro`/`outro` scenes and boards have `intro` interludes, each played at most once per run — never replayed when you die and retry a board.
 
 There is also a `legacy/` folder containing a earlier zero-dependency vanilla JS/Canvas version of the same game, kept for reference. It is not part of the active build; don't edit it unless specifically asked to.
 
@@ -35,13 +37,14 @@ Collision is hand-rolled tile lookup (`PlayScene.solid()` / `circleWall()` / `mo
 
 ### Content is data, not code
 
-Three registries define everything a level designer would touch, and none of them require touching AI/rendering code to extend:
+Four registries define everything a level designer would touch, and none of them require touching AI/rendering code to extend:
 
-- `src/data/weapons.ts` — `WEAPONS` (melee vs. gun stats, throwability) and `PICKUP_CHARS` (map-char → weapon).
-- `src/data/enemies.ts` — `ENEMY_TYPES` (behavior: `'melee'` telegraphs a parryable windup strike; `'ranged'` keeps distance and rushes when out of ammo), each with a unique map `char` and a `CharPalette`. `ENEMY_CHARS` is the derived char→type lookup.
-- `src/data/levels.ts` — `LEVELS[]`, each an ASCII map (`#` wall, `.` floor, `+` door, `P` start, `X` exit, plus enemy/weapon chars) with briefing text and per-floor neon colors/music root.
+- `src/data/weapons.ts` — `WEAPONS` (melee vs. gun stats, `grip` animation class, throwability; melee `range`/`arc` double as the hitbox, so keep them matched to the animation shape) and `PICKUP_CHARS` (map-char → weapon).
+- `src/data/enemies.ts` — `ENEMY_TYPES` (behavior: `'melee'` telegraphs a parryable windup strike; `'ranged'` keeps distance and rushes when out of ammo; the unarmed `thug` is melee with `weapon: 'fists'` and drops nothing), each with a unique map `char` and a `CharPalette`. `ENEMY_CHARS` is the derived char→type lookup.
+- `src/data/levels.ts` — `LEVELS[]`: each `LevelDef` has a briefing, story-scene hooks (`intro`/`outro`/`clearCopy`) and `boards: BoardDef[]`. Each board is an ASCII map (`#` wall, `.` floor, `+` door, `P` start, `X` exit, plus enemy/weapon chars) with per-board neon colors/music root, plus `objective`/`goal`/`intro`.
+- `src/data/story.ts` — `CHARACTERS` (name, plate color, screen side, `CharPalette` — Wren reuses `PLAYER_PAL` so the cutout matches the in-game rig) and `SCENES` (scene-id → dialogue lines; lines starting with `(` render as inner monologue).
 
-`src/systems/level.ts` (`parseLevel`) turns a `LevelDef` into the collision grid, spawn points, door states (with hinge orientation inferred from neighboring walls), and precomputed neon wall-trim edge segments. It has no Phaser dependency, so it's the layer to unit-test if map-generation logic grows.
+`src/systems/level.ts` (`parseLevel`) turns a `BoardDef` into the collision grid, spawn points, door states (with hinge orientation inferred from neighboring walls), and precomputed neon wall-trim edge segments. It throws loudly on ragged map rows or a missing/duplicate `P`/`X`, so content typos fail the smoke test instead of leaking walkable void. It has no Phaser dependency, so it's the layer to unit-test if map-generation logic grows.
 
 All tuning constants (speeds, cooldowns, camera behavior, scoring) live in `src/config.ts` — change game feel there, not scattered through `PlayScene`.
 
@@ -59,7 +62,9 @@ All tuning constants (speeds, cooldowns, camera behavior, scoring) live in `src/
 
 ### Everything else is DOM, not canvas
 
-Menus, briefings, pause, death/clear/win screens are plain HTML overlays in `index.html` (`.overlay` divs toggled via class) styled in `src/style.css`, not Phaser scenes — only the HUD (`src/scenes/HudScene.ts`, weapon/ammo/cooldowns/score/combo) runs as a second always-on-top Phaser scene with an unzoomed camera, since it needs to read live sim state every frame without being affected by the play camera's zoom/shake.
+Menus, briefings, pause, death/clear/win screens AND the visual-novel dialogue are plain HTML overlays in `index.html` (`.overlay` divs toggled via class) styled in `src/style.css`, not Phaser scenes — only the HUD (`src/scenes/HudScene.ts`, weapon/ammo/cooldowns/score/combo/board goal) runs as a second always-on-top Phaser scene with an unzoomed camera, since it needs to read live sim state every frame without being affected by the play camera's zoom/shake.
+
+The `Flow` class in `main.ts` owns campaign progression (levelIndex + boardIndex, board-start score for retries, best score) and story gating: `playStory(id, done)` plays a scene at most once per run via a `seen` set. `src/dialogue.ts` (`DialoguePlayer`) only renders one scene — cutouts, name plate, typewriter — and calls back when done; input for it (click / Enter / Space / pad-A advance, Esc / START skip) is wired in `main.ts`. `src/portraits.ts` draws the full-body pixel cutouts from each character's `CharPalette` on an offscreen canvas (data URLs, `image-rendering: pixelated`) — same no-image-assets rule as `textures.ts`.
 
 ### Audio
 
@@ -68,8 +73,10 @@ Menus, briefings, pause, death/clear/win screens are plain HTML overlays in `ind
 ## Adding content (common tasks)
 
 - **New weapon**: add to `WEAPONS` in `data/weapons.ts` (+ `PICKUP_CHARS` if it should spawn on maps). Unknown weapon textures fall back to the pistol sprite (see `getWeaponTex` in `textures.ts`), so it's playable immediately; add a real sprite case in `makeSharedTextures` if desired.
-- **New enemy type**: add to `ENEMY_TYPES` in `data/enemies.ts` with a unique `char`, then use that char in any level map. No AI code changes needed — behavior is entirely driven by the `behavior`/`speed`/`sight`/`windup`/etc. fields.
-- **New level**: append a `LevelDef` to `LEVELS` in `data/levels.ts`. Exactly one `P` and one `X` required; `parseLevel` will derive everything else. Floor counter and progression pick it up automatically since they read `LEVELS.length`.
+- **New enemy type**: add to `ENEMY_TYPES` in `data/enemies.ts` with a unique `char`, then use that char in any board map. No AI code changes needed — behavior is entirely driven by the `behavior`/`speed`/`sight`/`windup`/etc. fields.
+- **New board**: append a `BoardDef` to an existing level's `boards` in `data/levels.ts`. Exactly one `P` and one `X` required, all rows equal length (`parseLevel` throws otherwise); progression and the HUD counter pick it up automatically. Use `objective: 'reach'` + `goal` for open-exit stealth boards.
+- **New level**: append a `LevelDef` (name, briefing, boards) to `LEVELS`. Optional `intro`/`outro`/`clearCopy` for story.
+- **New story scene**: add lines to `SCENES` in `data/story.ts` (add speakers to `CHARACTERS` if needed — a palette is all a new character requires; the portrait is generated), then reference the scene id from a level's `intro`/`outro` or a board's `intro`. Scenes play once per run; death/retry never replays them.
 
 ## Windows-specific gotchas (this dev environment)
 

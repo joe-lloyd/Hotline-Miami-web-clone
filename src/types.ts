@@ -26,6 +26,9 @@ export interface CharPalette {
 export interface WeaponDef {
   kind: 'melee' | 'gun';
   name: string;
+  /** hold/animation class: how the rig carries, swings and parries with
+   *  it (stab vs. sweep, one- vs. two-handed grip) */
+  grip: 'unarmed' | 'melee1h' | 'melee2h' | 'gun1h' | 'gun2h';
   /** melee: reach in px */
   range?: number;
   /** melee: swing arc in radians */
@@ -75,16 +78,37 @@ export interface EnemyDef {
   fireCd?: number;
 }
 
-/** One floor (data/levels.ts). */
-export interface LevelDef {
+/** One playable map — a "board". Levels group several (data/levels.ts). */
+export interface BoardDef {
   name: string;
-  briefing: string[];
   accent: string;
   accent2: string;
   floorA: string;
   floorB: string;
   musicRoot: number;
   map: string[];
+  /** 'clear' (default): exit unlocks when every enemy is dead.
+   *  'reach': exit is open from the start — sneak past or fight through;
+   *  exiting with zero kills pays GHOST_BONUS. */
+  objective?: 'clear' | 'reach';
+  /** HUD objective line for 'reach' boards (default 'REACH THE EXIT') */
+  goal?: string;
+  /** dialogue scene (data/story.ts) played the first time this board is
+   *  entered in a run — skipped on death/retry so it never spams */
+  intro?: string;
+}
+
+/** One level/chapter: a briefing plus a run of boards (data/levels.ts). */
+export interface LevelDef {
+  name: string;
+  briefing: string[];
+  boards: BoardDef[];
+  /** dialogue scene played before this level's briefing */
+  intro?: string;
+  /** dialogue scene played after the last board (final level: pre-win) */
+  outro?: string;
+  /** clear-screen flavor copy (innerHTML) shown after finishing the level */
+  clearCopy?: string;
 }
 
 /** Live player state, mutated by PlayScene. */
@@ -130,10 +154,15 @@ export interface BulletState {
 export interface ThrowableState {
   x: number; y: number; vx: number; vy: number;
   w: string; spin: number; life: number; dead?: boolean;
+  /** rounds left in a thrown gun — restored when it lands as a pickup */
+  ammo?: number;
 }
 
 export interface PickupState {
   x: number; y: number; w: string; spin: number;
+  /** rounds left in the mag (guns): dropped/thrown guns keep their count,
+   *  map-placed pickups spawn with a full one */
+  ammo?: number;
 }
 
 export interface DoorState {

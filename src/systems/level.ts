@@ -14,7 +14,7 @@
 import { TILE, WALL_INSET } from '../config';
 import { ENEMY_CHARS } from '../data/enemies';
 import { PICKUP_CHARS } from '../data/weapons';
-import type { DoorState, LevelDef } from '../types';
+import type { BoardDef, DoorState } from '../types';
 
 export interface ParsedLevel {
   grid: number[][];          // 1 = wall, 0 = walkable (doors are 0 here)
@@ -31,10 +31,18 @@ export interface ParsedLevel {
   edges: [number, number, number, number][];
 }
 
-export function parseLevel(L: LevelDef): ParsedLevel {
+export function parseLevel(L: BoardDef): ParsedLevel {
   const T = TILE;
   const rows = L.map;
   const H = rows.length, W = rows[0].length;
+  // loud validation: a ragged row or missing P/X is a content typo that
+  // would otherwise fail as subtle unreachable-void weirdness
+  if (rows.some(r => r.length !== W))
+    throw new Error(`${L.name}: map rows must all be ${W} chars`);
+  const pCount = rows.join('').split('P').length - 1;
+  const xCount = rows.join('').split('X').length - 1;
+  if (pCount !== 1 || xCount !== 1)
+    throw new Error(`${L.name}: map needs exactly one P and one X (got ${pCount}/${xCount})`);
   const grid: number[][] = [];
   const doors: DoorState[] = [];
   const enemies: ParsedLevel['enemies'] = [];

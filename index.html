@@ -33,8 +33,23 @@
       <span class="k">R-CLICK / F / Q</span><span>parry</span>
       <span class="k">E</span><span>pick up / throw weapon</span>
       <span class="k">ESC</span><span>pause</span>
+      <span class="k">GAMEPAD</span><span>sticks move / aim &middot; RT attack &middot; A / R3 dodge &middot; LT parry &middot; X / RB throw &middot; START pause</span>
     </div>
     <div class="best-line">BEST SCORE&nbsp;&nbsp;<span id="menu-best" class="bright">0</span></div>
+  </div>
+
+  <!-- ===== DIALOGUE (visual novel) ===== -->
+  <div id="ov-dialog" class="overlay dialog-bg">
+    <div class="dlg-stage">
+      <img id="dlg-left" class="dlg-char left" alt="">
+      <img id="dlg-right" class="dlg-char right" alt="">
+    </div>
+    <div id="dlg-box" class="dlg-box">
+      <div id="dlg-name" class="dlg-name"></div>
+      <div id="dlg-text" class="dlg-text"></div>
+      <div id="dlg-next" class="dlg-next">&#9660;</div>
+    </div>
+    <div class="hint">CLICK / ENTER next &middot; ESC skip</div>
   </div>
 
   <!-- ===== BRIEFING ===== -->
@@ -51,7 +66,7 @@
     <div class="chapter" style="font-size:34px;color:#00e5ff;">PAUSED</div>
     <div class="btn-row">
       <button id="btn-resume" class="btn btn-cyan">&#9654; RESUME</button>
-      <button id="btn-retry-pause" class="btn btn-ghost">&#8635; RESTART FLOOR</button>
+      <button id="btn-retry-pause" class="btn btn-ghost">&#8635; RESTART BOARD</button>
       <button id="btn-quit" class="btn btn-ghost">QUIT TO MENU</button>
     </div>
     <div class="hint">press ESC to resume</div>
@@ -69,13 +84,13 @@
     <div class="hint">press ENTER to retry</div>
   </div>
 
-  <!-- ===== FLOOR CLEARED ===== -->
+  <!-- ===== LEVEL CLEARED ===== -->
   <div id="ov-clear" class="overlay clear-bg">
-    <div class="cleartitle">FLOOR CLEARED</div>
-    <p id="clear-copy" class="copy">One building down. The Voronovs will send more &mdash; they always do.<br><span class="pink">Freedom has a body count. You're just getting started.</span></p>
+    <div class="cleartitle">LEVEL CLEARED</div>
+    <p id="clear-copy" class="copy">One job down. The night isn't finished with you yet.</p>
     <div class="score-line">SCORE&nbsp;&nbsp;<span id="clear-score" class="bright lg">0</span></div>
     <div class="btn-row">
-      <button id="btn-next" class="btn btn-cyan">NEXT FLOOR &#9654;</button>
+      <button id="btn-next" class="btn btn-cyan">NEXT LEVEL &#9654;</button>
       <button id="btn-menu-clear" class="btn btn-ghost">MENU</button>
     </div>
     <div class="hint">press ENTER</div>
