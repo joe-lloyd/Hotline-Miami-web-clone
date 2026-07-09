@@ -30,11 +30,13 @@
       <span class="k">MOUSE</span><span>aim</span>
       <span class="k">L-CLICK</span><span>attack / shoot / kick doors</span>
       <span class="k">SHIFT / SPACE</span><span>dodge roll</span>
-      <span class="k">R-CLICK / F / Q</span><span>parry</span>
+      <span class="k">R-CLICK / Q</span><span>parry</span>
       <span class="k">E</span><span>pick up / throw weapon</span>
+      <span class="k">F</span><span>interact</span>
       <span class="k">ESC</span><span>pause</span>
-      <span class="k">GAMEPAD</span><span>sticks move / aim &middot; RT attack &middot; A / R3 dodge &middot; LT parry &middot; X / RB throw &middot; START pause</span>
+      <span class="k">GAMEPAD</span><span>sticks move / aim &middot; RT attack &middot; RB dodge &middot; LT parry &middot; LB throw &middot; A interact &middot; START pause</span>
     </div>
+    <button id="btn-remap" class="btn btn-ghost" style="margin-top:18px;">&#127918; CONTROLLER SETUP</button>
     <div class="best-line">BEST SCORE&nbsp;&nbsp;<span id="menu-best" class="bright">0</span></div>
   </div>
 
@@ -67,9 +69,21 @@
     <div class="btn-row">
       <button id="btn-resume" class="btn btn-cyan">&#9654; RESUME</button>
       <button id="btn-retry-pause" class="btn btn-ghost">&#8635; RESTART BOARD</button>
+      <button id="btn-remap-pause" class="btn btn-ghost">&#127918; CONTROLLER</button>
       <button id="btn-quit" class="btn btn-ghost">QUIT TO MENU</button>
     </div>
     <div class="hint">press ESC to resume</div>
+  </div>
+
+  <!-- ===== CONTROLLER REMAP ===== -->
+  <div id="ov-remap" class="overlay pause-bg">
+    <div class="chapter" style="font-size:26px;">CONTROLLER</div>
+    <div id="remap-list" class="remap-list"></div>
+    <div class="btn-row">
+      <button id="btn-remap-reset" class="btn btn-ghost">RESET DEFAULTS</button>
+      <button id="btn-remap-done" class="btn btn-cyan">DONE</button>
+    </div>
+    <div class="hint">click an action, then press any controller button &middot; ESC to close</div>
   </div>
 
   <!-- ===== GAME OVER ===== -->

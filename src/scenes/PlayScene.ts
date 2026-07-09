@@ -308,12 +308,16 @@ export class PlayScene extends Phaser.Scene {
     this.padLook = rMag > PAD.aimDeadzone ? Math.min(1, rMag) : 0;
     if (rMag > PAD.aimDeadzone) { this.player.ang = Math.atan2(rs.y, rs.x); this.padAim = true; }
 
+    // remappable bindings — see padmap.ts (and the CONTROLLER menu)
     const btn = (i: number) => (pad.buttons[i]?.value ?? 0) > PAD.trigger;
+    const on = (a: 'attack' | 'parry' | 'dodge' | 'pickup' | 'interact') =>
+      padmap.map[a].some(btn);
     const cur = {
-      dash: btn(0) || btn(10),    // A / cross, or clicking the aim stick (R3)
-      pick: btn(2) || btn(5),     // X / square, or RB
-      atk: btn(7),                // RT
-      parry: btn(6) || btn(4),    // LT / LB
+      dash: on('dodge'),
+      pick: on('pickup'),
+      atk: on('attack'),
+      parry: on('parry'),
+      inter: on('interact'),
     };
     // buttons still held from before the scene started (e.g. the A that
     // confirmed RETRY) must not fire on frame one
@@ -322,8 +326,9 @@ export class PlayScene extends Phaser.Scene {
     if (cur.pick && !this.padPrev.pick) this.pickTap = true;
     if (cur.atk && !this.padPrev.atk) this.attackTap = true;
     if (cur.parry && !this.padPrev.parry) this.parryTap = true;
+    if (cur.inter && !this.padPrev.inter) this.interactTap = true;
     this.padFire = cur.atk;
-    if (mx || my || rMag > PAD.aimDeadzone || cur.dash || cur.pick || cur.atk || cur.parry)
+    if (mx || my || rMag > PAD.aimDeadzone || cur.dash || cur.pick || cur.atk || cur.parry || cur.inter)
       this.padActive = true;
     this.padPrev = cur;
     return { mx, my };
@@ -620,6 +625,11 @@ export class PlayScene extends Phaser.Scene {
       if (!this.tryPickup()) this.throwWeapon();
     }
 
+    if (this.interactTap) {
+      this.interactTap = false;
+      this.tryInteract();
+    }
+
     const wdef = WEAPONS[p.weapon];
     if (wdef.kind === 'gun') {
       if ((this.mouseDown || this.padFire) && p.atkT <= 0) this.fireGun();
@@ -754,6 +764,33 @@ export class PlayScene extends Phaser.Scene {
     this.playerRig.setWeapon(p.weapon);
     audio.sfx('pickup');
     return true;
+  }
+
+  // ================= environment interaction =================
+  /** Register an environment hook (key, computer, switch …). Content
+   *  removes it inside `use` via removeInteractable when consumed. */
+  addInteractable(x: number, y: number, r: number, use: () => void): Interactable {
+    const it: Interactable = { x, y, r, use };
+    this.interactables.push(it);
+    return it;
+  }
+
+  removeInteractable(it: Interactable): void {
+    this.interactables = this.interactables.filter(x => x !== it);
+  }
+
+  /** INTERACT tap: fire the nearest hook the player is standing at. */
+  private tryInteract(): void {
+    const p = this.player;
+    let best: Interactable | null = null, bd = 1e9;
+    for (const it of this.interactables) {
+      const d = Math.hypot(it.x - p.x, it.y - p.y);
+      if (d < it.r + p.r && d < bd) { bd = d; best = it; }
+    }
+    if (best) {
+      audio.sfx('pickup');
+      best.use();
+    }
   }
 
   throwWeapon(): void {
@@ -1177,6 +1214,15 @@ export class PlayScene extends Phaser.Scene {
     g.lineStyle(3, this.cleared ? accent2 : 0x553366, this.cleared ? 0.55 + 0.45 * pul : 0.25);
     g.strokeRect(ex - 14, ey - 14, 28, 28);
     if (this.cleared) g.strokeRect(ex - 8, ey - 8, 16, 16);
+
+    // interactables: pulsing prompt ring when the player is close
+    for (const it of this.interactables) {
+      if (Math.hypot(it.x - p.x, it.y - p.y) < it.r + 60) {
+        const k = 0.5 + 0.5 * Math.sin(this.time2 * 5);
+        g.lineStyle(2, accent2, 0.3 + 0.4 * k);
+        g.strokeCircle(it.x, it.y, 8 + k * 2.5);
+      }
+    }
 
     // dash afterimages
     for (const tr of this.trail) {

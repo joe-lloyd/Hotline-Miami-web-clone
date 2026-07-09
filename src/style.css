@@ -224,6 +224,29 @@ body {
 .dlg-next.on { opacity: 1; animation: ddpulse 1s infinite; }
 #ov-dialog .hint { margin: 10px 0 14px; }
 
+/* --- controller remap menu --- */
+.remap-list {
+  margin-top: 26px;
+  width: 460px;
+  border: 2px solid #6a5a7a;
+  background: rgba(10,2,16,.85);
+}
+.remap-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 18px;
+  cursor: pointer;
+  font-size: 14px;
+  letter-spacing: 1px;
+  border-bottom: 1px solid rgba(106,90,122,.35);
+}
+.remap-row:last-child { border-bottom: none; }
+.remap-row:hover { background: rgba(0,229,255,.08); }
+.remap-label { color: var(--lav); }
+.remap-val { color: var(--cyan); }
+.remap-row.waiting { background: rgba(255,45,149,.12); }
+.remap-row.waiting .remap-val { color: var(--pink); animation: ddpulse 0.8s infinite; }
+
 /* --- controls table on menu --- */
 .controls-grid {
   margin-top: 30px;

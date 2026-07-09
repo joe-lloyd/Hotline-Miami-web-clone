@@ -291,6 +291,42 @@ try {
   check('knife stab: narrow cone hits ahead only', r.aheadDead && r.sideAlive);
   check('bat sweep: wide arc catches off-axis', r.sweptDead);
 
+  // --- 7d. interact (F / pad A): nearest hook in range fires ---
+  await begin();
+  r = await scene(`(S) => {
+    const p = S.player;
+    let used = 0;
+    S.addInteractable(p.x + 12, p.y, 26, () => used++);
+    S.interactTap = true;
+    S.update(0, 16);
+    const inRange = used;
+    p.x = 35.5 * 32; p.y = 22.5 * 32;   // far away from the hook
+    S.interactTap = true;
+    S.update(0, 16);
+    return { inRange, total: used };
+  }`);
+  check('interact fires the hook in range', r.inRange === 1);
+  check('interact does nothing out of range', r.total === 1);
+
+  // --- 7e. controller remapping: rebind persists, steals, resets ---
+  r = await page.evaluate(() => {
+    const { padmap, flow } = window.DD;
+    padmap.rebind('dodge', 1);                      // dodge -> B
+    const bound = padmap.map.dodge.join(',');
+    padmap.rebind('parry', 1);                      // parry steals B
+    const stolen = padmap.map.dodge.length === 0 && padmap.map.parry.join(',') === '1';
+    const persisted = (localStorage.getItem('deaddrop_padmap') || '').includes('"parry":[1]');
+    padmap.reset();
+    const resetOk = padmap.map.dodge.join(',') === '5,11' && padmap.map.parry.join(',') === '6';
+    flow.openRemap();
+    const overlay = flow.mode === 'remap' &&
+      document.querySelector('#ov-remap').classList.contains('on');
+    flow.closeRemap();
+    return { bound, stolen, persisted, resetOk, overlay, back: flow.mode };
+  });
+  check('rebind + steal + persist + reset', r.bound === '1' && r.stolen && r.persisted && r.resetOk);
+  check('remap overlay opens and returns', r.overlay && r.back === 'menu', 'back=' + r.back);
+
   // --- 8. doors: closed = solid + sight-blocking; kick staggers ---
   await begin();
   r = await scene(`(S) => {
@@ -343,13 +379,20 @@ try {
   check('ghost bonus for zero kills', r.gain === 500, 'gain=' + r.gain);
 
   // --- 11. finishing a level -> LEVEL CLEARED -> intro dialogue -> briefing ---
+  // (the underpass is also the first SHAPED board: ragged rows pad to void)
   await begin(0, 1);
-  await scene(`(S) => {
+  r = await scene(`(S) => {
+    const hasVoid = S.lvl.grid.some(row => row.includes(2));
+    const voidSolid = S.solid(40.5 * 32, 2.5 * 32);   // padded top-right region
+    const unbounded = S.cameras.main.useBounds === false;
     const T = 32;
     S.player.x = S.lvl.exit.tx * T + T/2;
     S.player.y = S.lvl.exit.ty * T + T/2;
     S.update(0, 16);
+    return { hasVoid, voidSolid, unbounded };
   }`);
+  check('shaped board: void cells are solid + camera unbounded',
+    r.hasVoid && r.voidSolid && r.unbounded);
   await sleep(400);
   r = await page.evaluate(() => ({
     mode: window.DD.flow.mode,
@@ -390,6 +433,33 @@ try {
   });
   check('interlude -> next board', r.mode === 'play' && r.board === 1 && r.enemies > 0,
     `board=${r.board}, enemies=${r.enemies}`);
+
+  // --- 12b. Strudel score: starts, advances, swaps live, stops ---
+  r = await page.evaluate(async () => {
+    const { audio, flow } = window.DD;
+    audio.init();   // allowed: --autoplay-policy=no-user-gesture-required
+    flow.levelIndex = 0; flow.boardIndex = 0; flow.score = 0;
+    flow.beginBoard();                       // -> playTrack(0) "Breach"
+    await new Promise(res => setTimeout(res, 600));
+    const cy = audio.cyclist;
+    const started = !!cy && cy.started;
+    const cpsBreach = cy?.cps;
+    const t0 = cy?.now() ?? 0;
+    await new Promise(res => setTimeout(res, 500));
+    const advancing = (cy?.now() ?? 0) > t0;
+    flow.levelIndex = 1; flow.boardIndex = 0;
+    flow.beginBoard();                       // live swap -> "Descent" (115bpm)
+    await new Promise(res => setTimeout(res, 300));
+    const cpsDescent = audio.cyclist?.cps;
+    flow.toMenu();                           // -> stopTrack()
+    return {
+      started, advancing,
+      tempoSwap: Math.abs(cpsBreach - 110 / 240) < 1e-6 && Math.abs(cpsDescent - 115 / 240) < 1e-6,
+      stopped: audio.cyclist.started === false,
+    };
+  });
+  check('strudel track starts and advances', r.started && r.advancing);
+  check('track swaps tempo live and stops', r.tempoSwap && r.stopped);
 
   // --- 13. final board -> ending scene -> win screen ---
   await begin(1, 2);

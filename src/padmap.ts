@@ -33,7 +33,7 @@ export const BUTTON_NAMES: Record<number, string> = {
 const DEFAULTS: Record<PadAction, number[]> = {
   attack: [7],       // RT
   parry: [6],        // LT
-  dodge: [5, 10],    // RB, clicking the aim stick
+  dodge: [5, 11],    // RB, clicking the aim stick (R3)
   pickup: [4],       // LB
   interact: [0],     // A
   pause: [9],        // START
@@ -59,8 +59,10 @@ class PadMap {
     } catch { /* corrupted save: keep defaults */ }
   }
 
-  /** All bound button names, e.g. "RB / R3" — for the remap menu. */
+  /** All bound button names, e.g. "RB / R3" — for the remap menu.
+   *  An action can end up unbound when another steals its button. */
   name(a: PadAction): string {
+    if (!this.map[a].length) return '—';
     return this.map[a].map(i => BUTTON_NAMES[i] ?? 'BTN' + i).join(' / ');
   }
 

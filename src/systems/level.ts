@@ -17,7 +17,10 @@ import { PICKUP_CHARS } from '../data/weapons';
 import type { BoardDef, DoorState } from '../types';
 
 export interface ParsedLevel {
-  grid: number[][];          // 1 = wall, 0 = walkable (doors are 0 here)
+  /** 0 = walkable (doors too), 1 = wall, 2 = VOID — outside a shaped
+   *  board: solid to movement/bullets/sight but never drawn, so the neon
+   *  void backdrop shows through */
+  grid: number[][];
   W: number;
   H: number;
   worldW: number;
@@ -33,14 +36,21 @@ export interface ParsedLevel {
 
 export function parseLevel(L: BoardDef): ParsedLevel {
   const T = TILE;
-  const rows = L.map;
-  const H = rows.length, W = rows[0].length;
-  // loud validation: a ragged row or missing P/X is a content typo that
-  // would otherwise fail as subtle unreachable-void weirdness
-  if (rows.some(r => r.length !== W))
-    throw new Error(`${L.name}: map rows must all be ${W} chars`);
-  const pCount = rows.join('').split('P').length - 1;
-  const xCount = rows.join('').split('X').length - 1;
+  const H = L.map.length;
+  const W = Math.max(...L.map.map(r => r.length));
+  // rows may be RAGGED: shaped (non-rectangular) boards are authored with
+  // ' ' void cells, and short rows are padded with void on the right
+  const rows = L.map.map(r => r.padEnd(W, ' '));
+  // loud validation: an unknown char or missing P/X is a content typo
+  const legal = new Set(['#', '.', ' ', '+', 'P', 'X',
+    ...Object.keys(ENEMY_CHARS), ...Object.keys(PICKUP_CHARS)]);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    if (!legal.has(rows[y][x]))
+      throw new Error(`${L.name}: unknown map char '${rows[y][x]}' at ${x},${y}`);
+  }
+  const all = rows.join('');
+  const pCount = all.split('P').length - 1;
+  const xCount = all.split('X').length - 1;
   if (pCount !== 1 || xCount !== 1)
     throw new Error(`${L.name}: map needs exactly one P and one X (got ${pCount}/${xCount})`);
   const grid: number[][] = [];
@@ -54,7 +64,7 @@ export function parseLevel(L: BoardDef): ParsedLevel {
     const grow: number[] = [];
     for (let x = 0; x < W; x++) {
       const c = rows[y][x];
-      grow.push(c === '#' ? 1 : 0);
+      grow.push(c === '#' ? 1 : c === ' ' ? 2 : 0);
       const wx = x * T + T / 2, wy = y * T + T / 2;
       if (c === 'P') player = { x: wx, y: wy };
       else if (c === 'X') exit = { tx: x, ty: y };

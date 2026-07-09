@@ -21,12 +21,13 @@ import { VIEW_W, VIEW_H, BEST_KEY } from './config';
 import { LEVELS } from './data/levels';
 import { SCENES } from './data/story';
 import { DialoguePlayer } from './dialogue';
+import { padmap, PAD_ACTIONS, type PadAction } from './padmap';
 import { audio } from './audio';
 import { makeSharedTextures } from './textures';
 import { PlayScene } from './scenes/PlayScene';
 import { HudScene } from './scenes/HudScene';
 
-type Mode = 'menu' | 'dialog' | 'briefing' | 'play' | 'paused' | 'dead' | 'clear' | 'win';
+type Mode = 'menu' | 'dialog' | 'briefing' | 'play' | 'paused' | 'dead' | 'clear' | 'win' | 'remap';
 
 const $ = (id: string) => document.getElementById(id)!;
 
@@ -57,6 +58,7 @@ class Flow {
   private overlays: Record<string, HTMLElement> = {
     menu: $('ov-menu'), dialog: $('ov-dialog'), briefing: $('ov-briefing'),
     paused: $('ov-pause'), dead: $('ov-dead'), clear: $('ov-clear'), win: $('ov-win'),
+    remap: $('ov-remap'),
   };
 
   show(mode: Mode): void {
@@ -108,8 +110,8 @@ class Flow {
   beginBoard(): void {
     this.boardStartScore = this.score;
     const B = LEVELS[this.levelIndex].boards[this.boardIndex];
-    audio.stopMusic();
-    audio.startMusic(B.musicRoot);
+    // per-level Strudel track, transposed to the board's bass root
+    audio.playTrack(this.levelIndex, B.musicRoot);
     const sm = this.game.scene;
     if (sm.isActive('play') || sm.isPaused('play')) sm.stop('play');
     sm.start('play', { levelIndex: this.levelIndex, boardIndex: this.boardIndex, score: this.score });
@@ -124,7 +126,7 @@ class Flow {
   nextLevel(): void {
     this.levelIndex++;
     this.boardIndex = 0;
-    audio.stopMusic();
+    audio.stopTrack();
     this.enterLevel();
   }
 
@@ -139,8 +141,16 @@ class Flow {
   advanceStory(): void { this.story.advance(); }
   skipStory(): void { this.story.skip(); }
 
+  // ---- controller remap overlay (opens from menu OR pause; returns) ----
+  private remapReturn: Mode = 'menu';
+  openRemap(): void {
+    this.remapReturn = this.mode === 'paused' ? 'paused' : 'menu';
+    this.show('remap');
+  }
+  closeRemap(): void { this.show(this.remapReturn); }
+
   toMenu(): void {
-    audio.stopMusic();
+    audio.stopTrack();
     this.game.scene.stop('play');
     this.show('menu');
   }
@@ -157,13 +167,13 @@ class Flow {
   }
 
   private onDeath(): void {
-    audio.stopMusic();
+    audio.stopTrack();
     this.saveBest();
     this.show('dead');
   }
 
   private onExit(): void {
-    audio.stopMusic();
+    audio.stopTrack();
     this.saveBest();
     this.game.scene.stop('play');
     const L = LEVELS[this.levelIndex];
@@ -234,6 +244,34 @@ async function boot(): Promise<void> {
   $('btn-start').addEventListener('click', () => flow.startRun());
   $('btn-begin').addEventListener('click', () => flow.startBoard());
   $('ov-dialog').addEventListener('click', () => flow.advanceStory());
+
+  // ---------------- controller remap menu ----------------
+  let awaiting: PadAction | null = null;     // row waiting for a button press
+  const remapList = $('remap-list');
+  const renderRemap = () => {
+    remapList.innerHTML = '';
+    for (const a of PAD_ACTIONS) {
+      const row = document.createElement('div');
+      row.className = 'remap-row' + (awaiting === a.id ? ' waiting' : '');
+      const label = document.createElement('span');
+      label.className = 'remap-label';
+      label.textContent = a.label;
+      const val = document.createElement('span');
+      val.className = 'remap-val';
+      val.textContent = awaiting === a.id ? 'PRESS A BUTTON…' : padmap.name(a.id);
+      row.append(label, val);
+      row.addEventListener('click', () => {
+        awaiting = awaiting === a.id ? null : a.id;
+        renderRemap();
+      });
+      remapList.appendChild(row);
+    }
+  };
+  const openRemap = () => { awaiting = null; renderRemap(); flow.openRemap(); };
+  $('btn-remap').addEventListener('click', openRemap);
+  $('btn-remap-pause').addEventListener('click', openRemap);
+  $('btn-remap-reset').addEventListener('click', () => { padmap.reset(); awaiting = null; renderRemap(); });
+  $('btn-remap-done').addEventListener('click', () => flow.closeRemap());
   $('btn-resume').addEventListener('click', () => flow.resume());
   $('btn-retry-pause').addEventListener('click', () => flow.retry());
   $('btn-quit').addEventListener('click', () => flow.toMenu());
@@ -262,6 +300,7 @@ async function boot(): Promise<void> {
       if (flow.mode === 'play') flow.pause();
       else if (flow.mode === 'paused') flow.resume();
       else if (flow.mode === 'dialog') flow.skipStory();
+      else if (flow.mode === 'remap') flow.closeRemap();
     }
     if (e.key === ' ') {
       e.preventDefault();
@@ -269,27 +308,39 @@ async function boot(): Promise<void> {
     }
   });
 
-  // ---------------- gamepad (menu flow + pause) ----------------
+  // ---------------- gamepad (menu flow, pause, remapping) ----------------
   // PlayScene reads the pad for gameplay; this raw-API loop drives the DOM
   // overlays instead, so it keeps working while the play scene is paused.
-  // A confirms menus; START pauses/resumes (START is unmapped in-game, so
-  // resuming can never trigger an action by accident).
-  let padA = false, padStart = false;
+  // A (hardwired, UI convention) confirms menus; the remappable 'pause'
+  // action pauses/resumes; in the remap overlay ANY pressed button binds
+  // the awaiting action.
+  let padWas: boolean[] = [];
   const padPoll = () => {
     const pad = navigator.getGamepads
       ? Array.from(navigator.getGamepads()).find(g => g && g.connected)
       : null;
     if (pad) {
-      const a = (pad.buttons[0]?.value ?? 0) > 0.5;
-      const start = (pad.buttons[9]?.value ?? 0) > 0.5;
-      if (a && !padA && flow.mode !== 'play' && flow.mode !== 'paused') advance();
-      if (start && !padStart) {
-        if (flow.mode === 'play') flow.pause();
-        else if (flow.mode === 'paused') flow.resume();
-        else if (flow.mode === 'dialog') flow.skipStory();
-        else advance();
+      const now = pad.buttons.map(b => (b?.value ?? 0) > 0.5);
+      const edge = (i: number) => now[i] && !padWas[i];
+      if (flow.mode === 'remap') {
+        if (awaiting !== null) {
+          const idx = now.findIndex((v, i) => v && !padWas[i]);
+          if (idx >= 0) {
+            padmap.rebind(awaiting, idx);
+            awaiting = null;
+            renderRemap();
+          }
+        }
+      } else {
+        if (edge(0) && flow.mode !== 'play' && flow.mode !== 'paused') advance();
+        if (padmap.map.pause.some(edge)) {
+          if (flow.mode === 'play') flow.pause();
+          else if (flow.mode === 'paused') flow.resume();
+          else if (flow.mode === 'dialog') flow.skipStory();
+          else advance();
+        }
       }
-      padA = a; padStart = start;
+      padWas = now;
     }
     requestAnimationFrame(padPoll);
   };
@@ -317,7 +368,7 @@ async function boot(): Promise<void> {
   fit();
 
   // debug / test handle
-  (window as any).DD = { game, flow, LEVELS };
+  (window as any).DD = { game, flow, LEVELS, padmap, audio };
 }
 
 void boot();

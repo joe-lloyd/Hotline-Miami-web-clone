@@ -12,13 +12,21 @@ import Phaser from 'phaser';
 import { VIEW_W, VIEW_H, PLAYER } from '../config';
 import { WEAPONS } from '../data/weapons';
 import { LEVELS } from '../data/levels';
+import { padmap } from '../padmap';
 import type { PlayScene } from './PlayScene';
 
 const PS2P = "'Press Start 2P', monospace";
 const TECH = "'Share Tech Mono', monospace";
 
-const HINT_KB = 'WASD move · CLICK attack · punch downs, stomp finishes · SHIFT dodge · R-CLICK/F parry (bullets need a weapon) · E pick up/throw · ESC pause';
-const HINT_PAD = 'LS move · RS aim · RT attack · punch downs, stomp finishes · A/R3 dodge · LT parry (bullets need a weapon) · X/RB pick up/throw · START pause';
+const HINT_KB = 'WASD move · CLICK attack · punch downs, stomp finishes · SHIFT dodge · R-CLICK/Q parry (bullets need a weapon) · E pick up/throw · F interact · ESC pause';
+
+/** Built live from the current bindings, so remaps show up immediately. */
+const padHint = (): string => {
+  const p = (a: Parameters<typeof padmap.primary>[0]) => padmap.primary(a);
+  return `LS move · RS aim · ${p('attack')} attack · punch downs, stomp finishes · ` +
+    `${p('dodge')} dodge · ${p('parry')} parry (bullets need a weapon) · ` +
+    `${p('pickup')} pick up/throw · ${p('interact')} interact · ${p('pause')} pause`;
+};
 
 export class HudScene extends Phaser.Scene {
   private weaponText!: Phaser.GameObjects.Text;
@@ -67,7 +75,7 @@ export class HudScene extends Phaser.Scene {
     const L = LEVELS[play.levelIndex];
     const B = L.boards[play.boardIndex];
     const wdef = WEAPONS[p.weapon];
-    this.hintText.setText(play.padActive ? HINT_PAD : HINT_KB);
+    this.hintText.setText(play.padActive ? padHint() : HINT_KB);
 
     this.weaponText.setText(wdef.name);
     if (wdef.kind === 'gun') {

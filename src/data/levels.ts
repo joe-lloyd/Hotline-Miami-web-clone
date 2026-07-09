@@ -11,6 +11,10 @@
  * MAP LEGEND
  *   #   wall
  *   .   floor
+ *   ' ' VOID — outside the level (shaped boards): solid but undrawn, the
+ *       neon void backdrop shows through. Rows may be RAGGED — short rows
+ *       are padded with void on the right, so boards can be long, L-shaped
+ *       or otherwise non-rectangular.
  *   +   DOOR — starts closed, blocks sight and movement; walk into it to
  *       push it open, or dash / melee it to KICK it open (staggers anyone
  *       within KICK_RADIUS on the other side)
@@ -98,10 +102,11 @@ export const LEVELS: LevelDef[] = [
           '#..####..####1.####..####..####....#',
           '#..####..####..####+#####..####....#',
           '#..####..####..####..####..####....#',
-          '#........####....g.................#',
-          '#..####..####..####..####..####.t..#',
-          '#..####..####..####..####..####....#',
-          '#.................................X#',
+          // shaped board: the meet is a dock jutting out into the void
+          '#........####....g.................######',
+          '#..####..####..####..####..####.t.......#',
+          '#..####..####..####..####..####........X#',
+          '#..................................######',
           '####################################',
         ],
       },

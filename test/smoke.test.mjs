@@ -57,10 +57,12 @@ try {
   console.log('play started');
 
   // the smoke run tests input plumbing, not survival: the alleys have
-  // patrolling thugs, so give the scripted player i-frames or a lucky
-  // patrol route ends the test at the death screen instead of pause
+  // patrolling thugs, and an unlucky patrol route ends the test at the
+  // death screen instead of pause. (An inv cheat doesn't work — the
+  // scripted dodge roll overwrites p.inv.) Park them in the far corner.
   await page.evaluate(() => {
-    window.DD.game.scene.getScene('play').player.inv = 9999;
+    const S = window.DD.game.scene.getScene('play');
+    for (const e of S.enemies) { e.x = 32.5 * 32; e.y = 1.5 * 32; e.aware = false; }
   });
 
   const box = await page.evaluate(() => {
@@ -129,8 +131,12 @@ try {
 
   await page.keyboard.press('Escape');
   await sleep(250);
-  const paused = await page.evaluate(() => document.querySelector('#ov-pause').classList.contains('on'));
-  if (!paused) throw new Error('pause overlay missing');
+  const pauseState = await page.evaluate(() => ({
+    on: document.querySelector('#ov-pause').classList.contains('on'),
+    mode: window.DD.flow.mode,
+    alive: window.DD.game.scene.getScene('play')?.player?.alive,
+  }));
+  if (!pauseState.on) throw new Error('pause overlay missing: ' + JSON.stringify(pauseState));
   await page.keyboard.press('Escape');
   console.log('pause ok');
 
